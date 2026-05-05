@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import relationship
@@ -55,8 +56,8 @@ class Photo(Base):
     __tablename__ = "photos"
 
     id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
-    card_id = Column(Integer, ForeignKey("cards.id", ondelete="SET NULL"), nullable=True)
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
+    card_id = Column(Integer, ForeignKey("cards.id", ondelete="SET NULL"), nullable=True, index=True)
     filename = Column(String(500), nullable=False)
     filepath = Column(String(500), nullable=False)
     width = Column(Integer, nullable=True)
@@ -73,7 +74,7 @@ class Detection(Base):
     __tablename__ = "detections"
 
     id = Column(Integer, primary_key=True, index=True)
-    photo_id = Column(Integer, ForeignKey("photos.id", ondelete="CASCADE"), nullable=False)
+    photo_id = Column(Integer, ForeignKey("photos.id", ondelete="CASCADE"), nullable=False, index=True)
     bib_number = Column(String(20), nullable=True)
     confidence_detection = Column(Float, default=0.0)
     confidence_ocr = Column(Float, default=0.0)
@@ -94,9 +95,10 @@ class Detection(Base):
 
 class BibGroup(Base):
     __tablename__ = "bib_groups"
+    __table_args__ = (UniqueConstraint("event_id", "bib_number", name="uq_bib_group_event_bib"),)
 
     id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
     bib_number = Column(String(20), nullable=False)
     photo_count = Column(Integer, default=0)
     best_photo_id = Column(Integer, ForeignKey("photos.id", ondelete="SET NULL"), nullable=True)

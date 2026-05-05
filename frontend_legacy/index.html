@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flashsport Tri</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1 onclick="goHome()" style="cursor:pointer">Flashsport Tri</h1>
+    </header>
+
+    <main>
+        <!-- PAGE 1: DASHBOARD -->
+        <section id="page-home" class="page active">
+            <div class="welcome">
+                <h2>Bonjour, bienvenue sur Flashsport Tri</h2>
+                <p class="hint">Tri automatique de vos photos de course par dossard et qualite</p>
+            </div>
+            <button class="btn btn-primary btn-lg" onclick="showPage('page-create')" style="margin-bottom:1.5rem">+ Nouvelle course</button>
+            <div id="events-list" class="events-grid"></div>
+        </section>
+
+        <!-- PAGE 2: CREER COURSE -->
+        <section id="page-create" class="page">
+            <div class="page-header">
+                <button class="btn-back" onclick="goHome()">← Retour</button>
+                <h2>Creer une course</h2>
+            </div>
+
+            <form id="form-create-event" class="create-form">
+                <div class="form-section">
+                    <h3>Informations</h3>
+                    <label>Nom de la course
+                        <input type="text" id="cr-name" placeholder="Ex: Triathlon de Nice 2025" required>
+                    </label>
+                    <label>Date
+                        <input type="date" id="cr-date" required>
+                    </label>
+                </div>
+
+                <div class="form-section">
+                    <h3>Parametres IA</h3>
+                    <p class="hint">Tu peux les modifier plus tard dans les parametres de la course.</p>
+
+                    <label>Chiffres sur les dossards
+                        <div class="form-row">
+                            <span>de</span>
+                            <input type="number" id="cr-bib-min" min="1" max="6" value="1" style="width:60px">
+                            <span>a</span>
+                            <input type="number" id="cr-bib-max" min="1" max="6" value="5" style="width:60px">
+                            <span>chiffres</span>
+                        </div>
+                    </label>
+
+                    <label>Seuil de flou <span class="hint">(plus haut = plus strict)</span>
+                        <div class="form-row">
+                            <input type="range" id="cr-blur" min="20" max="200" value="40" style="flex:1">
+                            <span id="cr-blur-val" style="width:40px;text-align:right">40</span>
+                        </div>
+                    </label>
+
+                    <label>Confiance detection <span class="hint">(sensibilite YOLO)</span>
+                        <div class="form-row">
+                            <input type="range" id="cr-yolo" min="10" max="80" value="35" style="flex:1">
+                            <span id="cr-yolo-val" style="width:40px;text-align:right">35%</span>
+                        </div>
+                    </label>
+
+                    <label>Dossard type <span class="hint">(glisse une photo d'un dossard pour aider la reconnaissance)</span>
+                        <div id="cr-sample-drop" class="sample-drop">
+                            <img id="cr-sample-preview" src="" style="display:none">
+                            <span id="cr-sample-text">Glisser un dossard ici ou cliquer</span>
+                            <input type="file" id="cr-sample-input" accept="image/*" style="display:none">
+                        </div>
+                    </label>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-lg">Creer la course</button>
+            </form>
+        </section>
+
+        <!-- PAGE 3: VUE COURSE -->
+        <section id="page-course" class="page">
+            <div class="page-header">
+                <button class="btn-back" onclick="goHome()">← Retour</button>
+                <h2 id="course-title">Ma course</h2>
+                <button class="btn btn-sm" onclick="showPage('page-settings')" id="btn-course-settings">Parametres</button>
+            </div>
+
+            <div id="course-stats" class="course-stats"></div>
+
+            <!-- Section Imports -->
+            <div class="course-section">
+                <div class="section-header">
+                    <h3>Imports de cartes</h3>
+                    <button class="btn btn-primary" onclick="showPage('page-add-card')">+ Importer une carte</button>
+                </div>
+                <div id="course-cards"></div>
+            </div>
+
+            <!-- Actions -->
+            <div class="course-actions">
+                <button id="btn-process" class="btn btn-primary btn-lg" onclick="launchProcess()">Lancer le traitement</button>
+                <button id="btn-stop" class="btn btn-stop btn-lg" onclick="stopCurrentEvent()" style="display:none">STOP</button>
+                <button id="btn-reset" class="btn btn-reset btn-lg" onclick="resetCurrentEvent()" style="display:none">Reset</button>
+                <div id="process-progress" style="display:none">
+                    <div class="progress-bar"><div class="progress-fill" id="process-fill"></div></div>
+                    <p id="process-text"></p>
+                </div>
+                <button class="btn btn-lg btn-bon" onclick="goResults()" id="btn-results" style="display:none">Voir les resultats</button>
+            </div>
+        </section>
+
+        <!-- PAGE 3b: PARAMETRES COURSE -->
+        <section id="page-settings" class="page">
+            <div class="page-header">
+                <button class="btn-back" onclick="goCourse()">← Retour</button>
+                <h2>Parametres</h2>
+            </div>
+            <div class="create-form">
+                <div class="form-section">
+                    <h3>Parametres IA</h3>
+                    <label>Seuil de flou
+                        <div class="form-row">
+                            <input type="range" id="cfg-blur" min="20" max="200" value="40" style="flex:1">
+                            <span id="cfg-blur-val" style="width:40px;text-align:right">40</span>
+                        </div>
+                    </label>
+                    <label>Confiance detection
+                        <div class="form-row">
+                            <input type="range" id="cfg-yolo" min="10" max="80" value="35" style="flex:1">
+                            <span id="cfg-yolo-val" style="width:40px;text-align:right">35%</span>
+                        </div>
+                    </label>
+                    <label>Chiffres du dossard
+                        <div class="form-row">
+                            <span>de</span>
+                            <input type="number" id="cfg-bib-min" min="1" max="6" value="1" style="width:60px">
+                            <span>a</span>
+                            <input type="number" id="cfg-bib-max" min="1" max="6" value="5" style="width:60px">
+                            <span>chiffres</span>
+                        </div>
+                    </label>
+                    <button class="btn btn-primary" onclick="saveConfig()">Sauvegarder</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- PAGE 3c: AJOUTER CARTE -->
+        <section id="page-add-card" class="page">
+            <div class="page-header">
+                <button class="btn-back" onclick="goCourse()">← Retour</button>
+                <h2>Importer une carte</h2>
+            </div>
+            <div class="create-form">
+                <div class="form-section">
+                    <h3>Depuis un dossier (carte SD)</h3>
+                    <form id="form-folder" class="form-col">
+                        <label>Chemin du dossier
+                            <input type="text" id="folder-path" placeholder="/Volumes/CARTE_SD/DCIM">
+                        </label>
+                        <button type="submit" class="btn btn-primary">Importer le dossier</button>
+                    </form>
+                </div>
+                <div class="form-section">
+                    <h3>Upload direct</h3>
+                    <p class="hint">Selectionne les photos depuis ton ordinateur</p>
+                    <input type="file" id="file-input" multiple accept="image/*" class="file-input-big">
+                </div>
+            </div>
+        </section>
+
+        <!-- PAGE 4: RESULTATS -->
+        <section id="page-results" class="page">
+            <div class="page-header">
+                <button class="btn-back" onclick="goCourse()">← Retour</button>
+                <h2 id="results-title">Resultats</h2>
+                <button class="btn btn-primary btn-lg" onclick="startVerifMode()" id="btn-verif-mode" style="margin-left:auto">Mode Verification</button>
+            </div>
+            <div id="results-stats" class="stats-bar"></div>
+            <div id="folders-list"></div>
+        </section>
+
+        <!-- PAGE 5: VIEWER -->
+        <section id="page-viewer" class="page">
+            <div id="viewer-topbar">
+                <button class="btn-back" id="viewer-back-btn" onclick="goResults()">← Retour</button>
+                <h2 id="viewer-title">Dossard #?</h2>
+                <span id="viewer-counter">0/0</span>
+                <span class="shortcuts">Entrer=Bon A=Mauvais Z=Annuler R=Rotation</span>
+            </div>
+            <!-- VERIF MODE: Phase progress bar -->
+            <div id="verif-phases" style="display:none">
+                <div class="verif-phase-bar">
+                    <div class="vp-item vp-active" id="vp-1"><span class="vp-dot"></span> Confirmes <span class="vp-count" id="vp-1-count"></span></div>
+                    <div class="vp-item" id="vp-2"><span class="vp-dot"></span> Uniques <span class="vp-count" id="vp-2-count"></span></div>
+                    <div class="vp-item" id="vp-3"><span class="vp-dot"></span> Sans dossard <span class="vp-count" id="vp-3-count"></span></div>
+                </div>
+                <div class="progress-bar" style="height:4px"><div class="progress-fill" id="verif-progress" style="width:0%"></div></div>
+            </div>
+            <div id="viewer-main">
+                <div id="viewer-img-wrap">
+                    <img id="viewer-img" src="">
+                    <canvas id="viewer-canvas"></canvas>
+                    <div id="viewer-zoom"></div>
+                </div>
+            </div>
+            <div id="viewer-bar">
+                <div id="viewer-info">
+                    <span id="viewer-confidence" class="viewer-confidence"></span>
+                    <span id="viewer-bib" class="viewer-bib"></span>
+                    <span id="viewer-score"></span>
+                    <span id="viewer-badge" class="badge"></span>
+                    <span id="viewer-file" class="hint"></span>
+                </div>
+                <div id="viewer-actions">
+                    <button class="btn btn-bon" onclick="vAct('bon')">Entrer Bon</button>
+                    <button class="btn btn-mauvais" onclick="vAct('mauvais')">A Mauvais</button>
+                    <button class="btn" onclick="vUndo()">Z Annuler</button>
+                    <button class="btn" onclick="vRotate()">R Rotation</button>
+                    <button class="btn" onclick="vNav(-1)">← Prec</button>
+                    <button class="btn" onclick="vNav(1)">Suiv →</button>
+                    <input type="text" id="viewer-bib-input" placeholder="N dossard">
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="/static/app.js?v=32"></script>
+</body>
+</html>

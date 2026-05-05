@@ -7,12 +7,16 @@ from pydantic import BaseModel
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
+from app.core.dependencies import get_current_user, require_module
 from app.db.database import get_db
 from app.models.models import Card, Detection, Event, Photo
 from app.schemas.schemas import CardOut, EventCreate, EventOut, EventStats
 from config import settings
 
 router = APIRouter(prefix="/api/events", tags=["events"])
+
+# All event routes require TRI module access
+_tri_user = require_module("TRI")
 
 
 class EventConfig(BaseModel):
@@ -52,21 +56,57 @@ def _compute_stats(event_id: int, db: Session) -> EventStats:
 
 
 def _event_out(event: Event, db: Session) -> EventOut:
-    total = db.query(Photo).filter(Photo.event_id == event.id).count()
-    processed = db.query(Photo).filter(
-        Photo.event_id == event.id, Photo.processed == True
-    ).count()
+    # Single query for event-level photo counts
+    photo_stats = db.query(
+        func.count(Photo.id).label("total"),
+        func.count(case((Photo.processed == True, 1))).label("processed"),
+    ).filter(Photo.event_id == event.id).first()
+
+    total = photo_stats.total or 0
+    processed = photo_stats.processed or 0
     pending = total - processed
 
     stats = _compute_stats(event.id, db) if processed > 0 else None
 
-    # Load cards with live photo counts
+    # Single query for ALL card stats at once
+    effective_bib = func.coalesce(Detection.validated_bib, Detection.bib_number)
+
+    card_stats_q = db.query(
+        Card.id,
+        func.count(Photo.id).label("photo_count"),
+        func.count(case((Photo.processed == True, 1))).label("processed_count"),
+    ).outerjoin(Photo, Photo.card_id == Card.id).filter(
+        Card.event_id == event.id
+    ).group_by(Card.id).all()
+
+    card_stats_map = {row.id: row for row in card_stats_q}
+
+    # Validated + bibs per card (separate query since it needs Detection join)
+    card_det_stats = db.query(
+        Photo.card_id,
+        func.count(case((Detection.validated == True, 1))).label("validated_count"),
+        func.count(func.distinct(
+            case((effective_bib.isnot(None), effective_bib))
+        )).label("unique_bibs"),
+    ).join(Detection, Detection.photo_id == Photo.id).filter(
+        Photo.event_id == event.id, Photo.card_id.isnot(None)
+    ).group_by(Photo.card_id).all()
+
+    card_det_map = {row.card_id: row for row in card_det_stats}
+
     cards_db = db.query(Card).filter(Card.event_id == event.id).order_by(Card.created_at).all()
     cards = []
     for c in cards_db:
-        count = db.query(Photo).filter(Photo.card_id == c.id).count()
+        cs = card_stats_map.get(c.id)
+        cd = card_det_map.get(c.id)
+        count = cs.photo_count if cs else 0
         c.photo_count = count
-        cards.append(CardOut.model_validate(c))
+        card_out = CardOut.model_validate(c)
+        card_out.processed_count = cs.processed_count if cs else 0
+        card_out.pending_count = count - card_out.processed_count
+        card_out.validated_count = cd.validated_count if cd else 0
+        card_out.unique_bibs = cd.unique_bibs if cd else 0
+        cards.append(card_out)
 
     return EventOut(
         id=event.id,
@@ -87,7 +127,7 @@ def _event_out(event: Event, db: Session) -> EventOut:
 
 
 @router.post("", response_model=EventOut)
-def create_event(data: EventCreate, db: Session = Depends(get_db)):
+def create_event(data: EventCreate, db: Session = Depends(get_db), _=Depends(_tri_user)):
     event = Event(name=data.name, date=data.date)
     db.add(event)
     db.commit()
@@ -96,13 +136,13 @@ def create_event(data: EventCreate, db: Session = Depends(get_db)):
 
 
 @router.get("", response_model=list[EventOut])
-def list_events(db: Session = Depends(get_db)):
+def list_events(db: Session = Depends(get_db), _=Depends(_tri_user)):
     events = db.query(Event).order_by(Event.created_at.desc()).all()
     return [_event_out(ev, db) for ev in events]
 
 
 @router.get("/{event_id}", response_model=EventOut)
-def get_event(event_id: int, db: Session = Depends(get_db)):
+def get_event(event_id: int, db: Session = Depends(get_db), _=Depends(_tri_user)):
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -110,7 +150,7 @@ def get_event(event_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{event_id}/config", response_model=EventOut)
-def update_config(event_id: int, data: EventConfig, db: Session = Depends(get_db)):
+def update_config(event_id: int, data: EventConfig, db: Session = Depends(get_db), _=Depends(_tri_user)):
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -132,6 +172,7 @@ async def upload_sample_bib(
     event_id: int,
     file: UploadFile,
     db: Session = Depends(get_db),
+    _=Depends(_tri_user),
 ):
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
@@ -153,7 +194,7 @@ async def upload_sample_bib(
 
 
 @router.delete("/{event_id}")
-def delete_event(event_id: int, db: Session = Depends(get_db)):
+def delete_event(event_id: int, db: Session = Depends(get_db), _=Depends(_tri_user)):
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -165,6 +206,10 @@ def delete_event(event_id: int, db: Session = Depends(get_db)):
     upload_dir = Path(settings.upload_dir) / str(event_id)
     if upload_dir.exists():
         shutil.rmtree(upload_dir)
+
+    thumb_dir = Path(settings.upload_dir) / "thumbnails" / str(event_id)
+    if thumb_dir.exists():
+        shutil.rmtree(thumb_dir)
 
     db.delete(event)
     db.commit()

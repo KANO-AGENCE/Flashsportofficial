@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+/* Custom FlashSport theme */
+:root {
+  --fs-primary: #2563eb;
+  --fs-primary-dark: #1d4ed8;
+  --fs-accent: #f59e0b;
+  --fs-success: #10b981;
+  --fs-danger: #ef4444;
+  --fs-warning: #f59e0b;
+  --fs-sidebar-bg: #0f172a;
+  --fs-sidebar-text: #e2e8f0;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }

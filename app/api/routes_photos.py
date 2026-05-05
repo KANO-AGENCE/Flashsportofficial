@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFi
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.core.dependencies import require_module
 from app.db.database import get_db, SessionLocal
 from app.models.models import BibGroup, Card, Detection, Event, Photo
 from app.schemas.schemas import (
@@ -25,6 +26,8 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp", ".webp", "
 
 router = APIRouter(prefix="/api", tags=["photos"])
 
+_tri_user = require_module("TRI")
+
 
 class FolderImport(BaseModel):
     folder_path: str
@@ -38,7 +41,7 @@ class CardCreate(BaseModel):
 # --- Cards ---
 
 @router.post("/events/{event_id}/cards", response_model=CardOut)
-def create_card(event_id: int, data: CardCreate, db: Session = Depends(get_db)):
+def create_card(event_id: int, data: CardCreate, db: Session = Depends(get_db), _=Depends(_tri_user)):
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -50,7 +53,7 @@ def create_card(event_id: int, data: CardCreate, db: Session = Depends(get_db)):
 
 
 @router.delete("/cards/{card_id}")
-def delete_card(card_id: int, db: Session = Depends(get_db)):
+def delete_card(card_id: int, db: Session = Depends(get_db), _=Depends(_tri_user)):
     card = db.query(Card).filter(Card.id == card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
@@ -77,6 +80,7 @@ async def upload_photos(
     files: list[UploadFile],
     card_id: int | None = None,
     db: Session = Depends(get_db),
+    _=Depends(_tri_user),
 ):
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
@@ -208,12 +212,17 @@ def import_from_folder(
     data: FolderImport,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    _=Depends(_tri_user),
 ):
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
 
-    folder = Path(data.folder_path)
+    folder = Path(data.folder_path).resolve()
+    # Block access to sensitive system paths
+    blocked = ["/etc", "/var", "/usr", "/bin", "/sbin", "/root", "/proc", "/sys"]
+    if any(str(folder).startswith(b) for b in blocked):
+        raise HTTPException(status_code=400, detail="Chemin non autorise")
     if not folder.exists():
         raise HTTPException(status_code=400, detail=f"Dossier introuvable: {data.folder_path}")
     if not folder.is_dir():
@@ -254,12 +263,17 @@ def list_photos(
     bib: str | None = None,
     classification: str | None = None,
     processed_only: bool = False,
+    card_id: int | None = None,
     db: Session = Depends(get_db),
+    _=Depends(_tri_user),
 ):
     query = db.query(Photo).filter(Photo.event_id == event_id)
 
     if processed_only:
         query = query.filter(Photo.processed == True)
+
+    if card_id is not None:
+        query = query.filter(Photo.card_id == card_id)
 
     photos = query.order_by(Photo.id).all()
 
@@ -286,7 +300,7 @@ def list_photos(
 
 
 @router.get("/photos/{photo_id}", response_model=PhotoOut)
-def get_photo(photo_id: int, db: Session = Depends(get_db)):
+def get_photo(photo_id: int, db: Session = Depends(get_db), _=Depends(_tri_user)):
     photo = db.query(Photo).filter(Photo.id == photo_id).first()
     if not photo:
         raise HTTPException(status_code=404, detail="Photo not found")
@@ -294,8 +308,16 @@ def get_photo(photo_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/photos/{photo_id}/rotate")
-def rotate_photo(photo_id: int, db: Session = Depends(get_db)):
-    """Rotate a photo 90° clockwise and save to disk."""
+def rotate_photo(photo_id: int, db: Session = Depends(get_db), _=Depends(_tri_user)):
+    """Rotate a photo 90° clockwise and save to disk.
+
+    Uses Pillow to handle EXIF orientation correctly:
+    1. Apply any existing EXIF orientation tag (so we work with the visual image)
+    2. Rotate 90° CW
+    3. Save without EXIF orientation tag (to avoid double-rotation in browsers)
+    """
+    from PIL import Image, ImageOps
+
     photo = db.query(Photo).filter(Photo.id == photo_id).first()
     if not photo:
         raise HTTPException(status_code=404, detail="Photo not found")
@@ -304,23 +326,35 @@ def rotate_photo(photo_id: int, db: Session = Depends(get_db)):
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
 
-    img = cv2.imread(str(filepath))
-    if img is None:
-        raise HTTPException(status_code=400, detail="Cannot read image")
+    img = Image.open(str(filepath))
 
-    rotated = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
-    cv2.imwrite(str(filepath), rotated)
+    # Apply EXIF orientation so we rotate the visually correct image
+    img = ImageOps.exif_transpose(img)
+
+    # Rotate 90° CW (Pillow uses counter-clockwise, so -90 = 270)
+    rotated = img.rotate(-90, expand=True)
+
+    # Strip EXIF orientation tag to prevent browsers from re-applying it
+    exif = rotated.getexif()
+    if 0x0112 in exif:  # Orientation tag
+        del exif[0x0112]
+
+    # Save with original quality
+    save_kwargs = {"quality": 95}
+    if filepath.suffix.lower() in (".jpg", ".jpeg"):
+        save_kwargs["exif"] = exif.tobytes() if exif else b""
+    rotated.save(str(filepath), **save_kwargs)
 
     # Update dimensions in DB
-    photo.width = rotated.shape[1]
-    photo.height = rotated.shape[0]
+    photo.width = rotated.width
+    photo.height = rotated.height
     db.commit()
 
     return {"message": "Photo rotated 90° CW", "width": photo.width, "height": photo.height}
 
 
 @router.get("/events/{event_id}/bibs", response_model=list[BibGroupOut])
-def list_bib_groups(event_id: int, db: Session = Depends(get_db)):
+def list_bib_groups(event_id: int, db: Session = Depends(get_db), _=Depends(_tri_user)):
     groups = (
         db.query(BibGroup)
         .filter(BibGroup.event_id == event_id)
@@ -356,6 +390,7 @@ def validate_detection(
     detection_id: int,
     data: ValidationUpdate,
     db: Session = Depends(get_db),
+    _=Depends(_tri_user),
 ):
     detection = db.query(Detection).filter(Detection.id == detection_id).first()
     if not detection:

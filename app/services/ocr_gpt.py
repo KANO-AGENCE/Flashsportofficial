@@ -26,6 +26,22 @@ def _encode_image(image: np.ndarray) -> str:
     return base64.b64encode(buffer).decode("utf-8")
 
 
+def _call_gpt_with_retry(create_fn, max_retries: int = 3) -> object:
+    """Call a GPT API function with exponential backoff retry."""
+    import time
+    for attempt in range(max_retries):
+        try:
+            return create_fn()
+        except Exception as e:
+            err_name = type(e).__name__
+            is_transient = any(k in err_name for k in ("RateLimit", "Timeout", "Connection", "APIError"))
+            if not is_transient or attempt == max_retries - 1:
+                raise
+            wait = 2 ** attempt
+            logger.warning(f"GPT API {err_name}, retry {attempt + 1}/{max_retries} in {wait}s")
+            time.sleep(wait)
+
+
 def detect_rotation_gpt(image: np.ndarray) -> int:
     """
     Use GPT-4o to determine how to rotate the image so the person
@@ -45,47 +61,52 @@ def detect_rotation_gpt(image: np.ndarray) -> int:
 
     try:
         client = get_client()
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an image orientation detector. You analyze sports/race photos "
-                        "and determine if the image needs rotation so that people are standing "
-                        "upright with their HEAD at the TOP and FEET at the BOTTOM of the image. "
-                        "You MUST reply with exactly one number: 0, 90, 180, or 270. "
-                        "0 means the image is already correct. "
-                        "90 means rotate 90 degrees clockwise. "
-                        "180 means the image is upside down. "
-                        "270 means rotate 90 degrees counter-clockwise. "
-                        "Most photos are already correct (0). Only suggest rotation if "
-                        "people are clearly sideways or upside down."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": (
-                                "Look at this sports race photo. Are the people standing upright "
-                                "(head at top, feet at bottom)? If not, how many degrees clockwise "
-                                "should I rotate it? Answer with ONLY: 0, 90, 180, or 270"
-                            ),
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{b64}",
+
+        def _call():
+            return client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an image orientation detector. You analyze sports/race photos "
+                            "and determine if the image needs rotation so that people are standing "
+                            "upright with their HEAD at the TOP and FEET at the BOTTOM of the image. "
+                            "You MUST reply with exactly one number: 0, 90, 180, or 270. "
+                            "0 means the image is already correct. "
+                            "90 means rotate 90 degrees clockwise. "
+                            "180 means the image is upside down. "
+                            "270 means rotate 90 degrees counter-clockwise. "
+                            "Most photos are already correct (0). Only suggest rotation if "
+                            "people are clearly sideways or upside down."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    "Look at this sports race photo. Are the people standing upright "
+                                    "(head at top, feet at bottom)? If not, how many degrees clockwise "
+                                    "should I rotate it? Answer with ONLY: 0, 90, 180, or 270"
+                                ),
                             },
-                        },
-                    ],
-                }
-            ],
-            max_tokens=5,
-            temperature=0,
-        )
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{b64}",
+                                },
+                            },
+                        ],
+                    }
+                ],
+                max_tokens=5,
+                temperature=0,
+                timeout=30,
+            )
+
+        response = _call_gpt_with_retry(_call)
 
         answer = response.choices[0].message.content.strip()
         digits = re.sub(r"[^0-9]", "", answer)
@@ -155,35 +176,40 @@ def read_bib_gpt(
 
     try:
         client = get_client()
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": (
-                                f"This is a cropped photo of a runner in a sports race. "
-                                f"Read the bib number (race number) on the runner's chest/torso. "
-                                f"The number has between {min_digits} and {max_digits} digits. "
-                                f"Reply with ONLY the number, nothing else. "
-                                f"If you cannot read any bib number, reply with: NONE"
-                            ),
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{b64}",
-                                "detail": "low",
+
+        def _call():
+            return client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    f"This is a cropped photo of a runner in a sports race. "
+                                    f"Read the bib number (race number) on the runner's chest/torso. "
+                                    f"The number has between {min_digits} and {max_digits} digits. "
+                                    f"Reply with ONLY the number, nothing else. "
+                                    f"If you cannot read any bib number, reply with: NONE"
+                                ),
                             },
-                        },
-                    ],
-                }
-            ],
-            max_tokens=20,
-            temperature=0,
-        )
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{b64}",
+                                    "detail": "low",
+                                },
+                            },
+                        ],
+                    }
+                ],
+                max_tokens=20,
+                temperature=0,
+                timeout=30,
+            )
+
+        response = _call_gpt_with_retry(_call)
 
         answer = response.choices[0].message.content.strip()
         logger.info(f"GPT Vision response: '{answer}'")

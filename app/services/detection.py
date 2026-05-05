@@ -1,16 +1,30 @@
+import threading
+
 import cv2
 import numpy as np
-from ultralytics import YOLO
 
 from config import settings
 
-_model: YOLO | None = None
+_model = None
+_model_lock = threading.Lock()
 
 
-def get_model() -> YOLO:
+def get_model():
     global _model
     if _model is None:
-        _model = YOLO(settings.yolo_model_path)
+        with _model_lock:
+            if _model is None:
+                # PyTorch 2.6+ defaults weights_only=True which breaks
+                # ultralytics model loading. Patch torch.load permanently.
+                import torch
+                _orig_load = torch.load
+                def _patched_load(*args, **kwargs):
+                    if 'weights_only' not in kwargs:
+                        kwargs['weights_only'] = False
+                    return _orig_load(*args, **kwargs)
+                torch.load = _patched_load
+                from ultralytics import YOLO
+                _model = YOLO(settings.yolo_model_path)
     return _model
 
 

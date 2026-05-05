@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+:root {
+  --turquoise: #0E97CF;
+  --turquoise-hover: #0B7DAD;
+  --navy: #001C34;
+  --slate: #314C63;
+  --beige: #DFD4BA;
+  --beige-light: #F5F0E6;
+  --gold: #AB935F;
+  --gold-light: #C9B47F;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: var(--navy);
+  background: var(--beige-light);
+}
+
+.font-display {
+  font-family: 'Playfair Display', serif;
+}
+
+/* Photo protection: no drag, no select, no context menu */
+.photo-protected {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+.photo-container {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Invisible overlay to block screenshots/right-click */
+.photo-container::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  pointer-events: all;
+  z-index: 10;
+}

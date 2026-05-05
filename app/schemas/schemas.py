@@ -17,6 +17,10 @@ class CardOut(BaseModel):
     total_expected: int = 0
     status: str = "pending"
     created_at: datetime | None = None
+    processed_count: int = 0
+    pending_count: int = 0
+    validated_count: int = 0
+    unique_bibs: int = 0
 
     class Config:
         from_attributes = True

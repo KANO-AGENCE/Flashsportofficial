@@ -3,16 +3,16 @@ import logging
 
 import cv2
 import numpy as np
-from paddleocr import PaddleOCR
 
 logger = logging.getLogger(__name__)
 
-_ocr: PaddleOCR | None = None
+_ocr = None
 
 
-def get_ocr() -> PaddleOCR:
+def get_ocr():
     global _ocr
     if _ocr is None:
+        from paddleocr import PaddleOCR
         _ocr = PaddleOCR(lang="en")
     return _ocr
 
