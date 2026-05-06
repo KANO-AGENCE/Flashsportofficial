@@ -7,6 +7,11 @@ from pydantic import BaseModel
 class EventCreate(BaseModel):
     name: str
     date: date
+    slug: str | None = None
+    description: str | None = None
+    photo_price: float = 2.0
+    pack_price: float = 9.90
+    all_photos_price: float = 49.90
 
 
 class CardOut(BaseModel):
@@ -51,6 +56,10 @@ class EventOut(BaseModel):
     yolo_confidence: float = 0.35
     bib_min_digits: int = 1
     bib_max_digits: int = 5
+    # Web event info
+    web_event_id: int | None = None
+    slug: str | None = None
+    is_published: bool = False
 
     class Config:
         from_attributes = True

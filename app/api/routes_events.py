@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import get_current_user, require_module
 from app.db.database import get_db
 from app.models.models import Card, Detection, Event, Photo
+from app.models.web import WebEvent
 from app.schemas.schemas import CardOut, EventCreate, EventOut, EventStats
 from config import settings
 
@@ -108,6 +109,9 @@ def _event_out(event: Event, db: Session) -> EventOut:
         card_out.unique_bibs = cd.unique_bibs if cd else 0
         cards.append(card_out)
 
+    # Web event info
+    web_event = db.query(WebEvent).filter(WebEvent.event_id == event.id).first()
+
     return EventOut(
         id=event.id,
         name=event.name,
@@ -123,13 +127,47 @@ def _event_out(event: Event, db: Session) -> EventOut:
         yolo_confidence=event.yolo_confidence,
         bib_min_digits=event.bib_min_digits,
         bib_max_digits=event.bib_max_digits,
+        web_event_id=web_event.id if web_event else None,
+        slug=web_event.slug if web_event else None,
+        is_published=web_event.is_published if web_event else False,
     )
+
+
+def _generate_slug(name: str) -> str:
+    """Generate a URL-safe slug from a name."""
+    import re
+    import unicodedata
+    slug = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    slug = slug.lower().strip()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    slug = slug.strip("-")
+    return slug or "course"
 
 
 @router.post("", response_model=EventOut)
 def create_event(data: EventCreate, db: Session = Depends(get_db), _=Depends(_tri_user)):
     event = Event(name=data.name, date=data.date)
     db.add(event)
+    db.flush()
+
+    # Auto-create linked WebEvent
+    slug = data.slug or _generate_slug(data.name)
+    # Ensure slug is unique
+    base_slug = slug
+    counter = 1
+    while db.query(WebEvent).filter(WebEvent.slug == slug).first():
+        slug = f"{base_slug}-{counter}"
+        counter += 1
+
+    web_event = WebEvent(
+        event_id=event.id,
+        slug=slug,
+        description=data.description or "",
+        photo_price=data.photo_price,
+        pack_price=data.pack_price,
+        all_photos_price=data.all_photos_price,
+    )
+    db.add(web_event)
     db.commit()
     db.refresh(event)
     return _event_out(event, db)

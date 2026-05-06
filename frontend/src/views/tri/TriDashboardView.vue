@@ -48,6 +48,7 @@
               <span>{{ ev.photo_count }} photos</span>
               <span v-if="ev.cards?.length">{{ ev.cards.length }} cartes</span>
               <span v-if="ev.stats">{{ ev.stats.unique_bibs }} dossards</span>
+              <span v-if="ev.is_published" class="text-green-600 font-medium">En ligne</span>
             </div>
             <div v-if="ev.photo_count > 0" class="mt-3">
               <div class="w-full bg-gray-200/50 rounded-full h-1.5">
@@ -69,11 +70,18 @@
         <form @submit.prevent="createEvent" class="space-y-4">
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Nom</label>
-            <input v-model="newEvent.name" type="text" required class="w-full px-3 py-2 bg-white/50 border border-gray-200/60 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 backdrop-blur-sm outline-none transition" placeholder="Triathlon de Nice 2025">
+            <input v-model="newEvent.name" @input="autoSlug" type="text" required class="w-full px-3 py-2 bg-white/50 border border-gray-200/60 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 backdrop-blur-sm outline-none transition" placeholder="Triathlon de Nice 2025">
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
             <input v-model="newEvent.date" type="date" required class="w-full px-3 py-2 bg-white/50 border border-gray-200/60 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 backdrop-blur-sm outline-none transition">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">URL web</label>
+            <div class="flex items-center gap-1">
+              <span class="text-sm text-gray-400 shrink-0">/evenement/</span>
+              <input v-model="newEvent.slug" type="text" required class="flex-1 px-3 py-2 bg-white/50 border border-gray-200/60 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 backdrop-blur-sm outline-none transition text-sm" placeholder="triathlon-nice-2025">
+            </div>
           </div>
           <div class="flex justify-end gap-3 mt-6">
             <button type="button" @click="showCreateModal = false" class="px-4 py-2 text-gray-500 hover:text-gray-700 hover:bg-white/50 rounded-xl transition">Annuler</button>
@@ -98,7 +106,7 @@ const store = useEventsStore()
 
 const showCreateModal = ref(false)
 const creating = ref(false)
-const newEvent = ref({ name: '', date: '' })
+const newEvent = ref({ name: '', date: '', slug: '' })
 
 onMounted(() => store.fetchEvents())
 
@@ -135,12 +143,18 @@ function statusClass(ev) {
   return map[s] || 'bg-gray-100/80 text-gray-600'
 }
 
+function autoSlug() {
+  newEvent.value.slug = newEvent.value.name
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+}
+
 async function createEvent() {
   creating.value = true
   try {
     const res = await eventsApi.create(newEvent.value)
     showCreateModal.value = false
-    newEvent.value = { name: '', date: '' }
+    newEvent.value = { name: '', date: '', slug: '' }
     router.push(`/tri/events/${res.data.id}`)
   } finally {
     creating.value = false

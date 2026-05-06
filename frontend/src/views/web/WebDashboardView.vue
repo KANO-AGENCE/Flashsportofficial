@@ -5,10 +5,7 @@
         <h1 class="text-2xl font-bold text-gray-900">E-commerce</h1>
         <p class="text-gray-500 text-sm">Gerez vos courses publiees sur le site web</p>
       </div>
-      <button @click="openCreate" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl font-medium text-sm shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all flex items-center gap-2">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-        Ajouter une course
-      </button>
+      <span class="text-xs text-gray-400">Les courses web sont creees automatiquement depuis l'onglet Tri</span>
     </div>
 
     <!-- Stats -->
@@ -83,62 +80,11 @@
       </div>
     </div>
 
-    <!-- Create Modal -->
-    <div v-if="showCreate" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div class="bg-white/90 backdrop-blur-2xl border border-white/60 shadow-2xl rounded-3xl w-full max-w-lg mx-4 p-6">
-        <h2 class="text-lg font-semibold mb-4 text-gray-900">Ajouter une course web</h2>
-
-        <div class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Lier a une course TRI</label>
-            <select v-model="newEvent.event_id" class="w-full px-3 py-2 bg-white/50 border border-gray-200/60 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 backdrop-blur-sm outline-none transition">
-              <option :value="0" disabled>Selectionnez une course...</option>
-              <option v-for="te in triEvents" :key="te.id" :value="te.id">{{ te.name }} ({{ te.date }})</option>
-            </select>
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">URL slug</label>
-            <div class="flex items-center gap-1">
-              <span class="text-sm text-gray-400">/evenement/</span>
-              <input v-model="newEvent.slug" type="text" class="flex-1 px-3 py-2 bg-white/50 border border-gray-200/60 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 backdrop-blur-sm outline-none transition" placeholder="mon-evenement-2026">
-            </div>
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
-            <textarea v-model="newEvent.description" rows="2" class="w-full px-3 py-2 bg-white/50 border border-gray-200/60 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 backdrop-blur-sm outline-none transition" placeholder="Description de l'evenement..."></textarea>
-          </div>
-
-          <div class="grid grid-cols-3 gap-3">
-            <div>
-              <label class="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">Prix photo</label>
-              <input v-model.number="newEvent.photo_price" type="number" step="0.01" class="w-full px-3 py-2 bg-white/50 border border-gray-200/60 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 backdrop-blur-sm outline-none transition">
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">Prix pack</label>
-              <input v-model.number="newEvent.pack_price" type="number" step="0.01" class="w-full px-3 py-2 bg-white/50 border border-gray-200/60 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 backdrop-blur-sm outline-none transition">
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">Prix tout</label>
-              <input v-model.number="newEvent.all_photos_price" type="number" step="0.01" class="w-full px-3 py-2 bg-white/50 border border-gray-200/60 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 backdrop-blur-sm outline-none transition">
-            </div>
-          </div>
-        </div>
-
-        <div class="flex justify-end gap-3 mt-6">
-          <button @click="showCreate = false" class="px-4 py-2 text-gray-500 hover:text-gray-700 hover:bg-white/50 rounded-xl text-sm transition">Annuler</button>
-          <button @click="createWebEvent" :disabled="!newEvent.event_id || !newEvent.slug" class="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white px-5 py-2 rounded-xl font-medium text-sm shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all">
-            Creer
-          </button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted } from 'vue'
 import { webApi } from '../../api/events.js'
 import api from '../../api/client.js'
 import { useToast } from '../../composables/useToast'
@@ -146,18 +92,6 @@ const toast = useToast()
 
 const stats = ref({ published_events: 0, total_photos: 0, total_orders: 0, total_revenue: 0 })
 const webEvents = ref([])
-const triEvents = ref([])
-const showCreate = ref(false)
-
-const defaultEvent = () => ({
-  event_id: 0,
-  slug: '',
-  description: '',
-  photo_price: 2.0,
-  pack_price: 9.90,
-  all_photos_price: 49.90,
-})
-const newEvent = ref(defaultEvent())
 
 async function loadData() {
   try {
@@ -169,38 +103,6 @@ async function loadData() {
     webEvents.value = eventsRes.data
   } catch (e) {
     console.error('Failed to load web data:', e)
-  }
-}
-
-async function loadTriEvents() {
-  try {
-    const res = await api.get('/web/admin/tri-events')
-    triEvents.value = res.data
-  } catch (e) {
-    console.error('Failed to load TRI events:', e)
-  }
-}
-
-function openCreate() {
-  newEvent.value = defaultEvent()
-  loadTriEvents()
-  showCreate.value = true
-}
-
-watch(() => newEvent.value.event_id, (id) => {
-  const te = triEvents.value.find(e => e.id === id)
-  if (te) {
-    newEvent.value.slug = te.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
-  }
-})
-
-async function createWebEvent() {
-  try {
-    await api.post('/web/admin/events', newEvent.value)
-    showCreate.value = false
-    await loadData()
-  } catch (e) {
-    toast.error(e.response?.data?.detail || e.message)
   }
 }
 
