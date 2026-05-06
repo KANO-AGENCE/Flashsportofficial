@@ -18,8 +18,8 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-# Parallel workers: Ollama supports NUM_PARALLEL concurrent requests
-WORKERS = 4
+# 2 workers: best balance between parallelism and GPU saturation on Apple Silicon
+WORKERS = 2
 
 
 def _detect_person_from_array(img: np.ndarray) -> dict | None:
@@ -91,12 +91,21 @@ def _analyze_photo(filepath: str, blur_threshold: float, bib_min: int, bib_max: 
     if img is None:
         return {"classification": "mauvais"}
 
-    # === STEP 2: Skip AI rotation (EXIF orient is enough for race photos) ===
-    # Save EXIF-corrected image
+    # === STEP 2: YOLO person detection first (fast, no AI call) ===
+    person = _detect_person_from_array(img)
+
+    # === STEP 3: If no person found, try rotation with Qwen ===
+    if person is None:
+        logger.info(f"No person found, trying rotation: {filepath}")
+        degrees = detect_rotation_qwen(img)
+        if degrees != 0:
+            img = apply_rotation(img, degrees)
+            logger.info(f"Rotated {degrees}°, retrying YOLO: {filepath}")
+            person = _detect_person_from_array(img)
+
+    # Save corrected image
     cv2.imwrite(filepath, img)
 
-    # === STEP 4: YOLO person detection (in-memory) ===
-    person = _detect_person_from_array(img)
     if person is None:
         return {"classification": "mauvais", "new_width": img.shape[1], "new_height": img.shape[0]}
 
