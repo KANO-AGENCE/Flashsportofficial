@@ -1,7 +1,7 @@
 """
-OCR via Qwen2.5-VL local (Ollama) — lecture de dossards uniquement.
-Remplace temporairement GPT-4o-mini pour la lecture de bibs.
-Ne recoit que le crop du dossard, jamais la photo complete.
+Vision IA locale via Qwen2.5-VL (Ollama).
+Remplace temporairement GPT-4o pour la rotation et GPT-4o-mini pour la lecture de bibs.
+Ne recoit que des crops/thumbnails, jamais la photo complete.
 """
 
 import base64
@@ -49,6 +49,69 @@ def _encode_image(image: np.ndarray) -> str:
     """Encode a cv2 image to base64 JPEG."""
     _, buffer = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 85])
     return base64.b64encode(buffer).decode("utf-8")
+
+
+def detect_rotation_qwen(image: np.ndarray) -> int:
+    """
+    Use Qwen2.5-VL local to determine image rotation.
+    Sends a 384px thumbnail.
+    Returns rotation in degrees clockwise: 0, 90, 180, or 270.
+    """
+    t_start = time.time()
+
+    h, w = image.shape[:2]
+    max_dim = 384
+    scale = max_dim / max(h, w)
+    thumb = cv2.resize(image, (int(w * scale), int(h * scale)))
+    b64 = _encode_image(thumb)
+
+    try:
+        if not _ensure_model_available():
+            logger.error("Qwen rotation: model not available, defaulting to 0")
+            return 0
+
+        resp = requests.post(
+            f"{OLLAMA_BASE_URL}/api/generate",
+            json={
+                "model": QWEN_MODEL,
+                "prompt": (
+                    "This is a sports race photo. Are people standing upright "
+                    "(head at top, feet at bottom)? If not, how many degrees clockwise "
+                    "should I rotate? Answer with ONLY one number: 0, 90, 180, or 270."
+                ),
+                "images": [b64],
+                "stream": False,
+                "options": {
+                    "temperature": 0,
+                    "num_predict": 5,
+                },
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        answer = data.get("response", "").strip()
+        elapsed = time.time() - t_start
+
+        logger.info(f"Qwen rotation raw response: '{answer}' ({elapsed:.2f}s)")
+
+        digits = re.sub(r"[^0-9]", "", answer)
+        if not digits:
+            logger.warning(f"Qwen rotation: no digits in '{answer}', defaulting to 0 ({elapsed:.2f}s)")
+            return 0
+
+        degrees = int(digits)
+        if degrees in (0, 90, 180, 270):
+            logger.info(f"Qwen rotation: {degrees} deg ({elapsed:.2f}s)")
+            return degrees
+
+        logger.warning(f"Qwen rotation: unexpected '{answer}', defaulting to 0 ({elapsed:.2f}s)")
+        return 0
+
+    except Exception as e:
+        elapsed = time.time() - t_start
+        logger.error(f"Qwen rotation error: {e} ({elapsed:.2f}s)")
+        return 0
 
 
 def read_bib_qwen(

@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 from app.db.database import SessionLocal
 from app.models.models import BibGroup, Detection, Photo, Event
 from app.services.detection import detect_persons
-from app.services.ocr_gpt import detect_rotation_gpt, apply_rotation
-from app.services.ocr_qwen import read_bib_qwen
+from app.services.ocr_gpt import apply_rotation
+from app.services.ocr_qwen import detect_rotation_qwen, read_bib_qwen
 from app.services.orientation import auto_orient
 from app.services.quality import is_blurry, is_person_cut, compute_framing_score
 from app.services.scoring import classify, compute_overall_score
@@ -91,8 +91,8 @@ def _analyze_photo(filepath: str, blur_threshold: float, bib_min: int, bib_max: 
     if img is None:
         return {"classification": "mauvais"}
 
-    # === STEP 2: GPT detects rotation needed ===
-    degrees = detect_rotation_gpt(img)
+    # === STEP 2: Qwen detects rotation needed ===
+    degrees = detect_rotation_qwen(img)
 
     # === STEP 3: Apply rotation if needed + single disk write ===
     if degrees != 0:
