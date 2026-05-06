@@ -18,8 +18,8 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-# Single worker: Qwen local uses GPU sequentially (not I/O bound like GPT API)
-WORKERS = 1
+# Parallel workers: Ollama supports NUM_PARALLEL concurrent requests
+WORKERS = 4
 
 
 def _detect_person_from_array(img: np.ndarray) -> dict | None:
@@ -91,15 +91,8 @@ def _analyze_photo(filepath: str, blur_threshold: float, bib_min: int, bib_max: 
     if img is None:
         return {"classification": "mauvais"}
 
-    # === STEP 2: Qwen detects rotation needed ===
-    degrees = detect_rotation_qwen(img)
-
-    # === STEP 3: Apply rotation if needed + single disk write ===
-    if degrees != 0:
-        img = apply_rotation(img, degrees)
-        logger.info(f"Rotated {degrees}°: {filepath}")
-
-    # Single write (combines EXIF orient + rotation)
+    # === STEP 2: Skip AI rotation (EXIF orient is enough for race photos) ===
+    # Save EXIF-corrected image
     cv2.imwrite(filepath, img)
 
     # === STEP 4: YOLO person detection (in-memory) ===
