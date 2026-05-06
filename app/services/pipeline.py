@@ -18,8 +18,8 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-# Number of parallel workers (GPT API calls are I/O bound, safe to parallelize)
-WORKERS = 8
+# Single worker: Qwen local uses GPU sequentially (not I/O bound like GPT API)
+WORKERS = 1
 
 
 def _detect_person_from_array(img: np.ndarray) -> dict | None:
