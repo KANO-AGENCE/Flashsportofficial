@@ -19,10 +19,9 @@ export const photosApi = {
     })
   },
   importFolder(eventId, folderPath, cardName = null) {
-    return api.post(`/events/${eventId}/import-folder`, {
-      folder_path: folderPath,
-      card_name: cardName,
-    })
+    const body = { folder_path: folderPath }
+    if (cardName) body.card_name = cardName
+    return api.post(`/events/${eventId}/import-folder`, body)
   },
   listBibs(eventId) {
     return api.get(`/events/${eventId}/bibs`)

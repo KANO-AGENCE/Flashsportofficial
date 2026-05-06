@@ -3,7 +3,6 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
-from pydantic import BaseModel
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
@@ -11,7 +10,7 @@ from app.core.dependencies import get_current_user, require_module
 from app.db.database import get_db
 from app.models.models import Card, Detection, Event, Photo
 from app.models.web import WebEvent
-from app.schemas.schemas import CardOut, EventCreate, EventOut, EventStats
+from app.schemas.schemas import CardOut, EventCreate, EventOut, EventStats, RaceConfig
 from config import settings
 
 router = APIRouter(prefix="/api/events", tags=["events"])
@@ -19,12 +18,13 @@ router = APIRouter(prefix="/api/events", tags=["events"])
 # All event routes require TRI module access
 _tri_user = require_module("TRI")
 
-
-class EventConfig(BaseModel):
-    blur_threshold: float | None = None
-    yolo_confidence: float | None = None
-    bib_min_digits: int | None = None
-    bib_max_digits: int | None = None
+# Fields that can be updated via RaceConfig
+_RACE_CONFIG_FIELDS = [
+    "blur_threshold", "yolo_confidence", "bib_min_digits", "bib_max_digits",
+    "precision_mode", "sport_type", "bib_color", "bib_position", "known_bibs",
+    "condition_lighting", "condition_environment", "condition_weather",
+    "photos_fast_motion", "avg_runners_per_photo",
+]
 
 
 def _compute_stats(event_id: int, db: Session) -> EventStats:
@@ -123,10 +123,20 @@ def _event_out(event: Event, db: Session) -> EventOut:
         stats=stats,
         cards=cards,
         sample_bib_path=event.sample_bib_path,
-        blur_threshold=event.blur_threshold,
-        yolo_confidence=event.yolo_confidence,
-        bib_min_digits=event.bib_min_digits,
-        bib_max_digits=event.bib_max_digits,
+        blur_threshold=event.blur_threshold or 100.0,
+        yolo_confidence=event.yolo_confidence or 0.35,
+        bib_min_digits=event.bib_min_digits or 1,
+        bib_max_digits=event.bib_max_digits or 5,
+        precision_mode=event.precision_mode if event.precision_mode is not None else True,
+        sport_type=event.sport_type or "running",
+        bib_color=event.bib_color or "white",
+        bib_position=event.bib_position or "chest",
+        known_bibs=event.known_bibs,
+        condition_lighting=event.condition_lighting or "day",
+        condition_environment=event.condition_environment or "outdoor",
+        condition_weather=event.condition_weather or "clear",
+        photos_fast_motion=event.photos_fast_motion or False,
+        avg_runners_per_photo=event.avg_runners_per_photo or 2,
         web_event_id=web_event.id if web_event else None,
         slug=web_event.slug if web_event else None,
         is_published=web_event.is_published if web_event else False,
@@ -188,21 +198,45 @@ def get_event(event_id: int, db: Session = Depends(get_db), _=Depends(_tri_user)
 
 
 @router.put("/{event_id}/config", response_model=EventOut)
-def update_config(event_id: int, data: EventConfig, db: Session = Depends(get_db), _=Depends(_tri_user)):
+def update_config(event_id: int, data: RaceConfig, db: Session = Depends(get_db), _=Depends(_tri_user)):
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
-    if data.blur_threshold is not None:
-        event.blur_threshold = data.blur_threshold
-    if data.yolo_confidence is not None:
-        event.yolo_confidence = data.yolo_confidence
-    if data.bib_min_digits is not None:
-        event.bib_min_digits = data.bib_min_digits
-    if data.bib_max_digits is not None:
-        event.bib_max_digits = data.bib_max_digits
+
+    for field in _RACE_CONFIG_FIELDS:
+        value = getattr(data, field, None)
+        if value is not None:
+            setattr(event, field, value)
+
     db.commit()
     db.refresh(event)
     return _event_out(event, db)
+
+
+@router.post("/{event_id}/known-bibs")
+async def import_known_bibs(
+    event_id: int,
+    file: UploadFile,
+    db: Session = Depends(get_db),
+    _=Depends(_tri_user),
+):
+    """Import a list of known bib numbers from a text/CSV file."""
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    content = await file.read()
+    text = content.decode("utf-8", errors="ignore")
+
+    # Parse: one bib per line, or comma-separated
+    import re
+    bibs = re.findall(r"\d+", text)
+    unique_bibs = sorted(set(bibs), key=lambda x: int(x))
+
+    event.known_bibs = "\n".join(unique_bibs)
+    db.commit()
+
+    return {"message": f"{len(unique_bibs)} dossards importes", "count": len(unique_bibs)}
 
 
 @router.post("/{event_id}/sample-bib", response_model=EventOut)

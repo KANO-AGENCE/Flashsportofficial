@@ -14,9 +14,32 @@ class EventCreate(BaseModel):
     all_photos_price: float = 49.90
 
 
+class RaceConfig(BaseModel):
+    """Race configuration — all fields optional for partial updates."""
+    # Processing
+    blur_threshold: float | None = None
+    yolo_confidence: float | None = None
+    bib_min_digits: int | None = None
+    bib_max_digits: int | None = None
+    precision_mode: bool | None = None
+    # Sport
+    sport_type: str | None = None
+    # Bib
+    bib_color: str | None = None
+    bib_position: str | None = None
+    known_bibs: str | None = None
+    # Conditions
+    condition_lighting: str | None = None
+    condition_environment: str | None = None
+    condition_weather: str | None = None
+    photos_fast_motion: bool | None = None
+    avg_runners_per_photo: int | None = None
+
+
 class CardOut(BaseModel):
     id: int
     name: str
+    card_number: int = 1
     source_path: str | None = None
     photo_count: int = 0
     total_expected: int = 0
@@ -51,11 +74,23 @@ class EventOut(BaseModel):
     pending_count: int = 0
     stats: EventStats | None = None
     cards: list[CardOut] = []
+    # Processing config
     sample_bib_path: str | None = None
     blur_threshold: float = 100.0
     yolo_confidence: float = 0.35
     bib_min_digits: int = 1
     bib_max_digits: int = 5
+    precision_mode: bool = True
+    # Race config
+    sport_type: str = "running"
+    bib_color: str = "white"
+    bib_position: str = "chest"
+    known_bibs: str | None = None
+    condition_lighting: str = "day"
+    condition_environment: str = "outdoor"
+    condition_weather: str = "clear"
+    photos_fast_motion: bool = False
+    avg_runners_per_photo: int = 2
     # Web event info
     web_event_id: int | None = None
     slug: str | None = None
@@ -83,6 +118,8 @@ class DetectionOut(BaseModel):
     validated: bool
     validated_bib: str | None
     validated_class: str | None
+    fallback_used: bool = False
+    ocr_raw_response: str | None = None
 
     class Config:
         from_attributes = True
@@ -94,10 +131,12 @@ class PhotoOut(BaseModel):
     id: int
     event_id: int
     filename: str
+    original_filename: str | None = None
     filepath: str
     width: int | None
     height: int | None
     processed: bool
+    processing_time: float | None = None
     created_at: datetime | None = None
     detections: list[DetectionOut] = []
 

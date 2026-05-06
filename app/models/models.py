@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -24,16 +25,39 @@ class Event(Base):
     name = Column(String(255), nullable=False)
     date = Column(Date, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
-    # Config
+
+    # --- Processing config ---
     sample_bib_path = Column(String(500), nullable=True)
     blur_threshold = Column(Float, default=100.0)
     yolo_confidence = Column(Float, default=0.35)
     bib_min_digits = Column(Integer, default=1)
     bib_max_digits = Column(Integer, default=5)
+    precision_mode = Column(Boolean, default=True)  # True = fiabilité max, False = rapide
+
+    # --- Race configuration ---
+    # Sport
+    sport_type = Column(String(50), default="running")  # running, triathlon, cycling, trail, swimming, obstacle, other
+    # Bib
+    bib_color = Column(String(30), default="white")  # white, black, yellow, red, blue, green, multi
+    bib_position = Column(String(20), default="chest")  # chest, back, both
+    # Known bib list (newline-separated for validation)
+    known_bibs = Column(Text, nullable=True)
+    # Conditions
+    condition_lighting = Column(String(20), default="day")  # day, night, mixed
+    condition_environment = Column(String(20), default="outdoor")  # outdoor, indoor, mixed
+    condition_weather = Column(String(20), default="clear")  # clear, rain, mud, snow
+    photos_fast_motion = Column(Boolean, default=False)
+    avg_runners_per_photo = Column(Integer, default=2)
 
     photos = relationship("Photo", back_populates="event", cascade="all, delete-orphan")
     cards = relationship("Card", back_populates="event", cascade="all, delete-orphan")
     bib_groups = relationship("BibGroup", back_populates="event", cascade="all, delete-orphan")
+
+    def get_known_bibs_set(self) -> set[str]:
+        """Parse known_bibs text into a set of bib strings."""
+        if not self.known_bibs:
+            return set()
+        return {b.strip() for b in self.known_bibs.strip().splitlines() if b.strip()}
 
 
 class Card(Base):
@@ -42,6 +66,7 @@ class Card(Base):
     id = Column(Integer, primary_key=True, index=True)
     event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(255), nullable=False)
+    card_number = Column(Integer, default=1)  # Sequential card number within event
     source_path = Column(String(500), nullable=True)
     photo_count = Column(Integer, default=0)
     total_expected = Column(Integer, default=0)
@@ -59,10 +84,12 @@ class Photo(Base):
     event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
     card_id = Column(Integer, ForeignKey("cards.id", ondelete="SET NULL"), nullable=True, index=True)
     filename = Column(String(500), nullable=False)
+    original_filename = Column(String(500), nullable=True)  # Original name before renaming
     filepath = Column(String(500), nullable=False)
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)
     processed = Column(Boolean, default=False)
+    processing_time = Column(Float, nullable=True)  # Seconds taken to process
     created_at = Column(DateTime, server_default=func.now())
 
     event = relationship("Event", back_populates="photos")
@@ -89,6 +116,9 @@ class Detection(Base):
     validated = Column(Boolean, default=False)
     validated_bib = Column(String(20), nullable=True)
     validated_class = Column(String(20), nullable=True)
+    # Pipeline traceability
+    fallback_used = Column(Boolean, default=False)  # True if Qwen full-image fallback was used
+    ocr_raw_response = Column(String(200), nullable=True)  # Raw Qwen response for debugging
 
     photo = relationship("Photo", back_populates="detections")
 

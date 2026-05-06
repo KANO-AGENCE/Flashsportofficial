@@ -61,9 +61,13 @@
             </div>
             <p class="text-sm text-gray-500 truncate">{{ photo.filename }}</p>
           </div>
-          <span :class="classificationBadge(photo)" class="text-xs font-medium px-2.5 py-1 rounded-full shrink-0 backdrop-blur-sm">
-            {{ classificationLabel(photo) }}
-          </span>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <span v-if="photo.detections?.[0]?.fallback_used" class="text-xs px-1.5 py-0.5 rounded bg-amber-100/80 text-amber-700 backdrop-blur-sm" title="Fallback Qwen utilise">FB</span>
+            <span v-if="photo.processing_time" class="text-xs text-gray-400">{{ photo.processing_time.toFixed(1) }}s</span>
+            <span :class="classificationBadge(photo)" class="text-xs font-medium px-2.5 py-1 rounded-full backdrop-blur-sm">
+              {{ classificationLabel(photo) }}
+            </span>
+          </div>
         </div>
       </div>
     </div>

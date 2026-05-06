@@ -9,7 +9,7 @@
         <h1 class="text-2xl font-bold text-gray-900">{{ event.name }}</h1>
         <p class="text-gray-500">{{ formatDate(event.date) }}</p>
       </div>
-      <button @click="showSettings = !showSettings" class="text-gray-400 hover:text-gray-600 hover:bg-white/50 p-2 rounded-xl transition">
+      <button @click="showSettings = !showSettings" :class="showSettings ? 'text-blue-600 bg-blue-50/80' : 'text-gray-400 hover:text-gray-600 hover:bg-white/50'" class="p-2 rounded-xl transition">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
       </button>
       <button @click="confirmDelete" class="text-red-400 hover:text-red-600 hover:bg-red-50/50 p-2 rounded-xl transition" title="Supprimer">
@@ -24,11 +24,11 @@
         <p class="text-xs text-gray-400 uppercase tracking-wider mt-1">Photos</p>
       </div>
       <div class="bg-white/70 backdrop-blur-xl border border-white/60 shadow-lg shadow-black/5 rounded-2xl p-4 text-center">
-        <p class="text-2xl font-bold text-blue-600">{{ event.stats.bon }}</p>
+        <p class="text-2xl font-bold text-green-600">{{ event.stats.bon }}</p>
         <p class="text-xs text-gray-400 uppercase tracking-wider mt-1">Bons</p>
       </div>
       <div class="bg-white/70 backdrop-blur-xl border border-white/60 shadow-lg shadow-black/5 rounded-2xl p-4 text-center">
-        <p class="text-2xl font-bold text-gray-500">{{ event.stats.incertain }}</p>
+        <p class="text-2xl font-bold text-amber-500">{{ event.stats.incertain }}</p>
         <p class="text-xs text-gray-400 uppercase tracking-wider mt-1">Incertains</p>
       </div>
       <div class="bg-white/70 backdrop-blur-xl border border-white/60 shadow-lg shadow-black/5 rounded-2xl p-4 text-center">
@@ -41,37 +41,172 @@
       </div>
     </div>
 
-    <!-- Settings panel -->
-    <div v-if="showSettings" class="bg-white/70 backdrop-blur-xl border border-white/60 shadow-lg shadow-black/5 rounded-2xl p-6 mb-6">
-      <h3 class="font-semibold mb-4 text-gray-900">Parametres IA</h3>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <!-- ========== RACE CONFIGURATION PANEL ========== -->
+    <div v-if="showSettings" class="bg-white/70 backdrop-blur-xl border border-white/60 shadow-lg shadow-black/5 rounded-2xl p-6 mb-6 space-y-6">
+      <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2">
+        <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+        Configuration de la course
+      </h3>
+
+      <!-- Sport & Conditions -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div>
-          <label class="block text-sm text-gray-600 mb-1">Seuil de flou</label>
-          <input type="range" v-model.number="config.blur_threshold" min="20" max="200" class="w-full">
-          <span class="text-sm text-gray-500">{{ config.blur_threshold }}</span>
+          <label class="block text-sm font-medium text-gray-600 mb-1.5">Type de sport</label>
+          <select v-model="config.sport_type" class="w-full px-3 py-2 bg-white/60 border border-gray-200/60 rounded-xl text-sm backdrop-blur-sm outline-none focus:ring-2 focus:ring-blue-500/30">
+            <option value="running">Course a pied</option>
+            <option value="triathlon">Triathlon</option>
+            <option value="cycling">Cyclisme</option>
+            <option value="trail">Trail</option>
+            <option value="swimming">Natation</option>
+            <option value="obstacle">Obstacle</option>
+            <option value="other">Autre</option>
+          </select>
         </div>
         <div>
-          <label class="block text-sm text-gray-600 mb-1">Confiance YOLO (%)</label>
-          <input type="range" v-model.number="config.yolo_confidence" min="10" max="80" class="w-full">
-          <span class="text-sm text-gray-500">{{ config.yolo_confidence }}%</span>
+          <label class="block text-sm font-medium text-gray-600 mb-1.5">Eclairage</label>
+          <select v-model="config.condition_lighting" class="w-full px-3 py-2 bg-white/60 border border-gray-200/60 rounded-xl text-sm backdrop-blur-sm outline-none focus:ring-2 focus:ring-blue-500/30">
+            <option value="day">Jour</option>
+            <option value="night">Nuit</option>
+            <option value="mixed">Mixte</option>
+          </select>
         </div>
         <div>
-          <label class="block text-sm text-gray-600 mb-1">Chiffres dossard</label>
-          <div class="flex items-center gap-2">
-            <input type="number" v-model.number="config.bib_min_digits" min="1" max="6" class="w-16 px-2 py-1 bg-white/50 border border-gray-200/60 rounded-xl backdrop-blur-sm outline-none">
-            <span>a</span>
-            <input type="number" v-model.number="config.bib_max_digits" min="1" max="6" class="w-16 px-2 py-1 bg-white/50 border border-gray-200/60 rounded-xl backdrop-blur-sm outline-none">
+          <label class="block text-sm font-medium text-gray-600 mb-1.5">Environnement</label>
+          <select v-model="config.condition_environment" class="w-full px-3 py-2 bg-white/60 border border-gray-200/60 rounded-xl text-sm backdrop-blur-sm outline-none focus:ring-2 focus:ring-blue-500/30">
+            <option value="outdoor">Exterieur</option>
+            <option value="indoor">Interieur</option>
+            <option value="mixed">Mixte</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-600 mb-1.5">Meteo</label>
+          <select v-model="config.condition_weather" class="w-full px-3 py-2 bg-white/60 border border-gray-200/60 rounded-xl text-sm backdrop-blur-sm outline-none focus:ring-2 focus:ring-blue-500/30">
+            <option value="clear">Beau temps</option>
+            <option value="rain">Pluie</option>
+            <option value="mud">Boue</option>
+            <option value="snow">Neige</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Bib Configuration -->
+      <div>
+        <h4 class="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wider">Dossards</h4>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div>
+            <label class="block text-sm text-gray-600 mb-1.5">Couleur dominante</label>
+            <select v-model="config.bib_color" class="w-full px-3 py-2 bg-white/60 border border-gray-200/60 rounded-xl text-sm backdrop-blur-sm outline-none focus:ring-2 focus:ring-blue-500/30">
+              <option value="white">Blanc</option>
+              <option value="black">Noir</option>
+              <option value="yellow">Jaune</option>
+              <option value="red">Rouge</option>
+              <option value="blue">Bleu</option>
+              <option value="green">Vert</option>
+              <option value="multi">Multicolore</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-600 mb-1.5">Position</label>
+            <select v-model="config.bib_position" class="w-full px-3 py-2 bg-white/60 border border-gray-200/60 rounded-xl text-sm backdrop-blur-sm outline-none focus:ring-2 focus:ring-blue-500/30">
+              <option value="chest">Devant</option>
+              <option value="back">Dos</option>
+              <option value="both">Recto/Verso</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-600 mb-1.5">Chiffres dossard</label>
+            <div class="flex items-center gap-2">
+              <input type="number" v-model.number="config.bib_min_digits" min="1" max="6" class="w-16 px-2 py-2 bg-white/60 border border-gray-200/60 rounded-xl text-sm backdrop-blur-sm outline-none">
+              <span class="text-gray-400">a</span>
+              <input type="number" v-model.number="config.bib_max_digits" min="1" max="6" class="w-16 px-2 py-2 bg-white/60 border border-gray-200/60 rounded-xl text-sm backdrop-blur-sm outline-none">
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-600 mb-1.5">Coureurs / photo</label>
+            <input type="range" v-model.number="config.avg_runners_per_photo" min="1" max="20" class="w-full">
+            <span class="text-xs text-gray-500">~ {{ config.avg_runners_per_photo }} coureurs</span>
           </div>
         </div>
       </div>
-      <button @click="saveConfig" class="mt-4 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all">Sauvegarder</button>
+
+      <!-- Photo conditions -->
+      <div>
+        <h4 class="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wider">Conditions photos</h4>
+        <div class="flex flex-wrap gap-4">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" v-model="config.photos_fast_motion" class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500">
+            <span class="text-sm text-gray-700">Photos tres rapides (flou de mouvement)</span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" v-model="config.precision_mode" class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500">
+            <span class="text-sm text-gray-700">Mode precision (plus lent, plus fiable)</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Processing thresholds -->
+      <div>
+        <h4 class="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wider">Seuils de traitement</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm text-gray-600 mb-1.5">Seuil de flou</label>
+            <input type="range" v-model.number="config.blur_threshold" min="20" max="200" class="w-full">
+            <div class="flex justify-between text-xs text-gray-400">
+              <span>Strict</span>
+              <span>{{ config.blur_threshold }}</span>
+              <span>Tolerant</span>
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm text-gray-600 mb-1.5">Confiance YOLO (%)</label>
+            <input type="range" v-model.number="config.yolo_confidence" min="10" max="80" class="w-full">
+            <div class="flex justify-between text-xs text-gray-400">
+              <span>Plus de detections</span>
+              <span>{{ config.yolo_confidence }}%</span>
+              <span>Plus precis</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Known bibs -->
+      <div>
+        <h4 class="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wider">Liste de dossards connus</h4>
+        <div class="flex items-start gap-4">
+          <div class="flex-1">
+            <textarea
+              v-model="config.known_bibs"
+              rows="3"
+              class="w-full px-3 py-2 bg-white/60 border border-gray-200/60 rounded-xl text-sm backdrop-blur-sm outline-none focus:ring-2 focus:ring-blue-500/30 font-mono"
+              placeholder="Un numero par ligne:&#10;318&#10;319&#10;320"
+            ></textarea>
+            <p class="text-xs text-gray-400 mt-1">{{ knownBibsCount }} dossards. Permet de corriger les erreurs OCR automatiquement.</p>
+          </div>
+          <div>
+            <label class="bg-blue-50 hover:bg-blue-100 text-blue-600 px-4 py-2 rounded-xl text-sm font-medium cursor-pointer transition inline-flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+              Importer fichier
+              <input type="file" class="hidden" accept=".txt,.csv" @change="importKnownBibs">
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end">
+        <button @click="saveConfig" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-medium shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all">
+          Sauvegarder la configuration
+        </button>
+      </div>
     </div>
 
     <!-- Cards -->
     <div class="bg-white/70 backdrop-blur-xl border border-white/60 shadow-lg shadow-black/5 rounded-2xl mb-6">
       <div class="flex items-center justify-between p-4 border-b border-gray-100/60">
         <h3 class="font-semibold text-gray-900">Cartes</h3>
-        <button @click="showImport = true" class="text-blue-600 hover:text-blue-500 text-sm font-medium transition">+ Importer</button>
+        <button @click="showImport = true" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all inline-flex items-center gap-1.5">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          Importer
+        </button>
       </div>
       <div v-if="!event.cards?.length" class="p-8 text-center text-gray-400">Aucune carte importee</div>
       <div v-else class="divide-y divide-gray-100/60">
@@ -81,14 +216,13 @@
             <div class="flex items-center gap-3">
               <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 backdrop-blur-sm"
                 :class="cardIconBg(card)">
-                <svg v-if="card.status === 'importing'" class="w-5 h-5 text-blue-500 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                <svg v-else-if="isCardProcessing(card.id)" class="w-5 h-5 text-blue-500 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                <svg v-if="card.status === 'importing' || isCardProcessing(card.id)" class="w-5 h-5 text-blue-500 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
                 <svg v-else-if="card.processed_count === card.photo_count && card.photo_count > 0" class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                 <svg v-else class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
               </div>
               <div>
-                <p class="font-medium text-gray-800">{{ card.name }}</p>
-                <p class="text-sm text-gray-500">{{ card.photo_count }} photos <span v-if="card.total_expected">/ {{ card.total_expected }}</span></p>
+                <p class="font-medium text-gray-800">{{ card.name }} <span class="text-xs text-gray-400 font-normal">#{{ String(card.card_number).padStart(3, '0') }}</span></p>
+                <p class="text-sm text-gray-500">{{ card.photo_count }} photos <span v-if="card.total_expected && card.status === 'importing'">/ {{ card.total_expected }}</span></p>
               </div>
             </div>
             <div class="flex items-center gap-2">
@@ -99,18 +233,25 @@
             </div>
           </div>
 
-          <!-- Card stats -->
+          <!-- Progress bar -->
           <div v-if="card.photo_count > 0" class="mb-3">
-            <div class="flex items-center gap-4 text-xs text-gray-500 mb-2">
-              <span class="text-blue-600 font-medium">{{ card.processed_count }} traitees</span>
-              <span v-if="card.pending_count > 0" class="text-gray-500 font-medium">{{ card.pending_count }} en attente</span>
-              <span class="text-blue-600 font-medium">{{ card.validated_count }} validees</span>
-              <span class="text-gray-600 font-medium">{{ card.unique_bibs }} dossards</span>
+            <div class="flex items-center gap-4 text-xs text-gray-500 mb-1.5">
+              <span class="font-medium" :class="card.processed_count === card.photo_count ? 'text-green-600' : 'text-blue-600'">{{ card.processed_count }}/{{ card.photo_count }} traitees</span>
+              <span v-if="card.unique_bibs" class="text-gray-600 font-medium">{{ card.unique_bibs }} dossards</span>
+              <span v-if="card.validated_count" class="text-gray-600 font-medium">{{ card.validated_count }} validees</span>
             </div>
             <div class="w-full bg-gray-200/50 rounded-full h-1.5">
               <div class="h-1.5 rounded-full transition-all bg-gradient-to-r"
                 :class="card.pending_count === 0 ? 'from-green-500 to-green-400' : 'from-blue-500 to-blue-400'"
                 :style="{ width: (card.processed_count / card.photo_count * 100) + '%' }"></div>
+            </div>
+          </div>
+
+          <!-- Processing progress detail for this card -->
+          <div v-if="isCardProcessing(card.id) && cardStatuses[card.id]" class="mb-3 bg-blue-50/50 backdrop-blur-sm rounded-xl p-3 border border-blue-100/60">
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-blue-700 font-medium">Traitement en cours...</span>
+              <span class="text-xs text-blue-600 font-mono">{{ cardStatuses[card.id].processed }}/{{ cardStatuses[card.id].total }}</span>
             </div>
           </div>
 
@@ -123,36 +264,20 @@
             >
               Traiter ({{ card.pending_count }})
             </button>
-            <span v-if="isCardProcessing(card.id)" class="text-xs text-blue-600 font-medium flex items-center gap-1">
-              <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-              Traitement...
-            </span>
             <button
               v-if="card.processed_count > 0"
               @click="router.push(`/tri/events/${event.id}/photos?card_id=${card.id}`)"
-              class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-xs font-medium shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all"
+              class="bg-white/80 hover:bg-white text-gray-700 border border-gray-200/60 px-4 py-2 rounded-xl text-xs font-medium transition"
             >
               Resultats ({{ card.processed_count }})
             </button>
             <button
               v-if="card.processed_count > 0"
               @click="router.push(`/tri/events/${event.id}/photos?card_id=${card.id}&verif=1`)"
-              class="bg-blue-500 hover:bg-blue-400 text-white px-4 py-2 rounded-xl text-xs font-medium shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all"
+              class="bg-white/80 hover:bg-white text-blue-600 border border-blue-200/60 px-4 py-2 rounded-xl text-xs font-medium transition"
             >
               Mode Verif
             </button>
-          </div>
-
-          <!-- Processing progress for this card -->
-          <div v-if="isCardProcessing(card.id) && cardStatuses[card.id]" class="mt-3 bg-gray-50/80 backdrop-blur-sm rounded-xl p-3 border border-gray-100/60">
-            <div class="flex items-center justify-between mb-1">
-              <span class="text-xs text-gray-600">Traitement en cours...</span>
-              <span class="text-xs text-gray-500">{{ cardStatuses[card.id].processed }} / {{ cardStatuses[card.id].total }}</span>
-            </div>
-            <div class="w-full bg-gray-200/50 rounded-full h-1.5">
-              <div class="bg-gradient-to-r from-blue-500 to-blue-400 h-1.5 rounded-full transition-all"
-                :style="{ width: cardProgressPct(card.id) + '%' }"></div>
-            </div>
           </div>
         </div>
       </div>
@@ -177,14 +302,14 @@
       <button
         v-if="event.processed_count > 0"
         @click="router.push(`/tri/events/${event.id}/photos`)"
-        class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-medium shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all"
+        class="bg-white/80 hover:bg-white text-gray-700 border border-gray-200/60 px-6 py-3 rounded-xl font-medium transition"
       >
-        Voir tous les resultats
+        Tous les resultats
       </button>
       <button
         v-if="event.processed_count > 0"
         @click="router.push(`/tri/events/${event.id}/photos?verif=1`)"
-        class="bg-blue-500 hover:bg-blue-400 text-white px-6 py-3 rounded-xl font-medium shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all"
+        class="bg-white/80 hover:bg-white text-blue-600 border border-blue-200/60 px-6 py-3 rounded-xl font-medium transition"
       >
         Verif globale
       </button>
@@ -192,7 +317,7 @@
         v-if="event.processed_count > 0"
         @click="publishToWeb"
         :disabled="publishing"
-        class="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-6 py-3 rounded-xl font-medium shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all"
+        class="bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white px-6 py-3 rounded-xl font-medium shadow-lg shadow-green-500/25 hover:shadow-green-500/40 transition-all"
       >
         {{ publishing ? 'Publication...' : 'Publier sur le web' }}
       </button>
@@ -209,7 +334,7 @@
     <div v-if="processing && !processingCardId" class="bg-white/70 backdrop-blur-xl border border-white/60 shadow-lg shadow-black/5 rounded-2xl p-4 mb-6">
       <div class="flex items-center justify-between mb-2">
         <span class="text-sm font-medium text-gray-700">Traitement en cours...</span>
-        <span class="text-sm text-gray-500">{{ processStatus.processed }} / {{ processStatus.total }}</span>
+        <span class="text-sm text-gray-500 font-mono">{{ processStatus.processed }} / {{ processStatus.total }}</span>
       </div>
       <div class="w-full bg-gray-200/50 rounded-full h-2">
         <div class="bg-gradient-to-r from-blue-500 to-blue-400 h-2 rounded-full transition-all" :style="{ width: progressPct + '%' }"></div>
@@ -244,6 +369,10 @@
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Chemin du dossier</label>
             <input v-model="importPath" type="text" required class="w-full px-3 py-2 bg-white/50 border border-gray-200/60 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 backdrop-blur-sm outline-none transition" placeholder="/Volumes/CARTE_SD/DCIM">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Nom de la carte (optionnel)</label>
+            <input v-model="importCardName" type="text" class="w-full px-3 py-2 bg-white/50 border border-gray-200/60 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 backdrop-blur-sm outline-none transition" placeholder="Carte SD photographe 1">
           </div>
           <div class="flex justify-end gap-3">
             <button type="button" @click="showImport = false" class="px-4 py-2 text-gray-500 hover:text-gray-700 hover:bg-white/50 rounded-xl transition">Annuler</button>
@@ -317,6 +446,7 @@ const showSettings = ref(false)
 const showImport = ref(false)
 const importMode = ref('folder')
 const importPath = ref('')
+const importCardName = ref('')
 const selectedFiles = ref([])
 const uploading = ref(false)
 const uploadProgress = ref(0)
@@ -324,16 +454,35 @@ const dragOver = ref(false)
 const processing = ref(false)
 const publishing = ref(false)
 const processStatus = ref({ total: 0, processed: 0 })
-// Multi-card processing: track which cards are being processed + their status
 const processingCards = ref(new Set())
-const cardStatuses = ref({}) // { cardId: { total, processed, pending } }
-const config = ref({ blur_threshold: 40, yolo_confidence: 35, bib_min_digits: 1, bib_max_digits: 5 })
+const cardStatuses = ref({})
+const config = ref({
+  blur_threshold: 100,
+  yolo_confidence: 35,
+  bib_min_digits: 1,
+  bib_max_digits: 5,
+  precision_mode: true,
+  sport_type: 'running',
+  bib_color: 'white',
+  bib_position: 'chest',
+  known_bibs: '',
+  condition_lighting: 'day',
+  condition_environment: 'outdoor',
+  condition_weather: 'clear',
+  photos_fast_motion: false,
+  avg_runners_per_photo: 2,
+})
 
 let pollTimer = null
 
 const progressPct = computed(() => {
   if (!processStatus.value.total) return 0
   return Math.round(processStatus.value.processed / processStatus.value.total * 100)
+})
+
+const knownBibsCount = computed(() => {
+  if (!config.value.known_bibs) return 0
+  return config.value.known_bibs.split('\n').filter(b => b.trim()).length
 })
 
 function isCardProcessing(cardId) {
@@ -346,7 +495,6 @@ function cardProgressPct(cardId) {
   return Math.round(s.processed / s.total * 100)
 }
 
-// Derive card display status from actual state
 function getCardState(card) {
   if (card.status === 'importing') return 'importing'
   if (isCardProcessing(card.id)) return 'processing'
@@ -382,7 +530,6 @@ function cardStatusText(card) {
     done: 'Termine',
     error: 'Erreur',
   }
-  // Also handle raw DB statuses that don't map to computed states
   if (card.status === 'error') return 'Erreur'
   if (card.status === 'stopped') return 'Stoppe'
   if (card.status === 'locked') return 'Gele'
@@ -397,10 +544,18 @@ async function loadEvent() {
     yolo_confidence: Math.round(res.data.yolo_confidence * 100),
     bib_min_digits: res.data.bib_min_digits,
     bib_max_digits: res.data.bib_max_digits,
+    precision_mode: res.data.precision_mode,
+    sport_type: res.data.sport_type || 'running',
+    bib_color: res.data.bib_color || 'white',
+    bib_position: res.data.bib_position || 'chest',
+    known_bibs: res.data.known_bibs || '',
+    condition_lighting: res.data.condition_lighting || 'day',
+    condition_environment: res.data.condition_environment || 'outdoor',
+    condition_weather: res.data.condition_weather || 'clear',
+    photos_fast_motion: res.data.photos_fast_motion || false,
+    avg_runners_per_photo: res.data.avg_runners_per_photo || 2,
   }
-  // Detect if any processing is active (reload scenario)
   if (res.data.pending_count > 0 && res.data.processed_count > 0 && !pollTimer) {
-    // Check if there are cards with pending photos that might be processing
     processing.value = true
     startMultiCardPolling()
   }
@@ -412,15 +567,38 @@ async function saveConfig() {
     yolo_confidence: config.value.yolo_confidence / 100,
     bib_min_digits: config.value.bib_min_digits,
     bib_max_digits: config.value.bib_max_digits,
+    precision_mode: config.value.precision_mode,
+    sport_type: config.value.sport_type,
+    bib_color: config.value.bib_color,
+    bib_position: config.value.bib_position,
+    known_bibs: config.value.known_bibs || null,
+    condition_lighting: config.value.condition_lighting,
+    condition_environment: config.value.condition_environment,
+    condition_weather: config.value.condition_weather,
+    photos_fast_motion: config.value.photos_fast_motion,
+    avg_runners_per_photo: config.value.avg_runners_per_photo,
   })
+  toast.success('Configuration sauvegardee')
   showSettings.value = false
   await loadEvent()
 }
 
+async function importKnownBibs(e) {
+  const file = e.target.files[0]
+  if (!file) return
+  const text = await file.text()
+  const bibs = text.match(/\d+/g) || []
+  const unique = [...new Set(bibs)].sort((a, b) => Number(a) - Number(b))
+  config.value.known_bibs = unique.join('\n')
+  toast.success(`${unique.length} dossards importes`)
+  e.target.value = ''
+}
+
 async function importFolder() {
-  await photosApi.importFolder(event.value.id, importPath.value)
+  await photosApi.importFolder(event.value.id, importPath.value, importCardName.value || null)
   showImport.value = false
   importPath.value = ''
+  importCardName.value = ''
   const cardPoll = setInterval(async () => {
     await loadEvent()
     const importing = event.value.cards?.some(c => c.status === 'importing' || c.status === 'pending')
@@ -473,7 +651,6 @@ async function uploadFiles() {
   await loadEvent()
 }
 
-// --- Processing per card ---
 async function processCard(card) {
   const res = await photosApi.processCard(event.value.id, card.id)
   if (res.data.message.includes('already')) {
@@ -485,14 +662,13 @@ async function processCard(card) {
 }
 
 function startMultiCardPolling() {
-  if (pollTimer) return // already polling
+  if (pollTimer) return
   pollTimer = setInterval(async () => {
     if (!processingCards.value.size && !processing.value) {
       stopPolling()
       return
     }
 
-    // Poll each card
     const cardIds = [...processingCards.value]
     const finished = []
     for (const cid of cardIds) {
@@ -503,14 +679,12 @@ function startMultiCardPolling() {
       } catch { finished.push(cid) }
     }
 
-    // Poll global if full-event processing
     if (processing.value) {
       const res = await photosApi.processStatus(event.value.id)
       processStatus.value = res.data
       if (res.data.pending === 0) processing.value = false
     }
 
-    // Clean up finished cards
     if (finished.length) {
       const next = new Set(processingCards.value)
       finished.forEach(cid => {
@@ -521,14 +695,12 @@ function startMultiCardPolling() {
       await loadEvent()
     }
 
-    // Stop polling if nothing left
     if (!processingCards.value.size && !processing.value) {
       stopPolling()
     }
   }, 2000)
 }
 
-// --- Processing global ---
 async function launchProcess() {
   await photosApi.process(event.value.id)
   processing.value = true

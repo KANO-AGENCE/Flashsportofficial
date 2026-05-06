@@ -52,6 +52,22 @@ app = FastAPI(
 )
 
 
+@app.on_event("startup")
+def preload_models():
+    """Pre-load YOLO model in background so first processing is fast."""
+    if not settings.yolo_enabled:
+        return
+    import threading
+    def _load():
+        try:
+            from app.services.detection import get_model
+            get_model()
+            logging.getLogger(__name__).info("YOLO model pre-loaded")
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"YOLO preload failed: {e}")
+    threading.Thread(target=_load, daemon=True).start()
+
+
 # Security headers
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):

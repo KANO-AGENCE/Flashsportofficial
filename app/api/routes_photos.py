@@ -6,6 +6,7 @@ from pathlib import Path
 import cv2
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import require_module
@@ -38,6 +39,25 @@ class CardCreate(BaseModel):
     name: str
 
 
+def _next_card_number(event_id: int, db: Session) -> int:
+    """Get next sequential card number for an event."""
+    max_num = db.query(func.max(Card.card_number)).filter(Card.event_id == event_id).scalar()
+    return (max_num or 0) + 1
+
+
+def _format_filename(event_id: int, card_number: int, photo_index: int, ext: str) -> str:
+    """Generate professional filename: EVENT-CARD-PHOTO.ext"""
+    return f"{event_id}-{card_number:03d}-{photo_index:06d}{ext}"
+
+
+def _get_next_photo_index(event_id: int, card_id: int, db: Session) -> int:
+    """Get next photo index for a card."""
+    count = db.query(func.count(Photo.id)).filter(
+        Photo.card_id == card_id
+    ).scalar()
+    return (count or 0) + 1
+
+
 # --- Cards ---
 
 @router.post("/events/{event_id}/cards", response_model=CardOut)
@@ -45,7 +65,8 @@ def create_card(event_id: int, data: CardCreate, db: Session = Depends(get_db), 
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
-    card = Card(event_id=event_id, name=data.name)
+    card_number = _next_card_number(event_id, db)
+    card = Card(event_id=event_id, name=data.name, card_number=card_number)
     db.add(card)
     db.commit()
     db.refresh(card)
@@ -89,14 +110,30 @@ async def upload_photos(
     upload_dir = Path(settings.upload_dir) / str(event_id)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
+    # Get card info for naming
+    card_number = 0
+    if card_id:
+        card = db.query(Card).filter(Card.id == card_id).first()
+        card_number = card.card_number if card else 0
+
     uploaded = []
+    photo_index = _get_next_photo_index(event_id, card_id, db) if card_id else 1
+
     for file in files:
         if not file.content_type or not file.content_type.startswith("image/"):
             continue
 
-        ext = Path(file.filename or "photo.jpg").suffix or ".jpg"
-        unique_name = f"{uuid.uuid4().hex}{ext}"
-        dest = upload_dir / unique_name
+        original_name = file.filename or "photo.jpg"
+        ext = Path(original_name).suffix.lower() or ".jpg"
+
+        # Professional naming
+        if card_id and card_number:
+            new_name = _format_filename(event_id, card_number, photo_index, ext)
+            photo_index += 1
+        else:
+            new_name = f"{uuid.uuid4().hex}{ext}"
+
+        dest = upload_dir / new_name
 
         with open(dest, "wb") as f:
             shutil.copyfileobj(file.file, f)
@@ -107,14 +144,15 @@ async def upload_photos(
         photo = Photo(
             event_id=event_id,
             card_id=card_id,
-            filename=file.filename or unique_name,
+            filename=new_name,
+            original_filename=original_name,
             filepath=str(dest),
             width=width,
             height=height,
         )
         db.add(photo)
         db.flush()
-        uploaded.append({"id": photo.id, "filename": photo.filename})
+        uploaded.append({"id": photo.id, "filename": photo.filename, "original": original_name})
 
     db.commit()
     return {"uploaded": len(uploaded), "photos": uploaded}
@@ -122,8 +160,8 @@ async def upload_photos(
 
 # --- Folder import ---
 
-def _import_folder_task(event_id: int, card_id: int, folder_path: str):
-    """Background task: scan folder and import all images into a card."""
+def _import_folder_task(event_id: int, card_id: int, card_number: int, folder_path: str):
+    """Background task: scan folder and import all images with professional naming."""
     db = SessionLocal()
     try:
         card = db.query(Card).filter(Card.id == card_id).first()
@@ -158,8 +196,10 @@ def _import_folder_task(event_id: int, card_id: int, folder_path: str):
                 return
             try:
                 ext = src_file.suffix.lower()
-                unique_name = f"{uuid.uuid4().hex}{ext}"
-                dest = upload_dir / unique_name
+                # Professional naming: EVENT-CARD-PHOTO.ext
+                photo_index = imported + 1
+                new_name = _format_filename(event_id, card_number, photo_index, ext)
+                dest = upload_dir / new_name
 
                 shutil.copy2(str(src_file), str(dest))
 
@@ -169,7 +209,8 @@ def _import_folder_task(event_id: int, card_id: int, folder_path: str):
                 photo = Photo(
                     event_id=event_id,
                     card_id=card_id,
-                    filename=src_file.name,
+                    filename=new_name,
+                    original_filename=src_file.name,
                     filepath=str(dest),
                     width=width,
                     height=height,
@@ -237,11 +278,13 @@ def import_from_folder(
     if count == 0:
         raise HTTPException(status_code=400, detail="Aucune image trouvee dans le dossier")
 
-    # Create card
+    # Create card with sequential number
     card_name = data.card_name or folder.name
+    card_number = _next_card_number(event_id, db)
     card = Card(
         event_id=event_id,
         name=card_name,
+        card_number=card_number,
         source_path=str(folder),
         total_expected=count,
         status="pending",
@@ -250,7 +293,7 @@ def import_from_folder(
     db.commit()
     db.refresh(card)
 
-    background_tasks.add_task(_import_folder_task, event_id, card.id, data.folder_path)
+    background_tasks.add_task(_import_folder_task, event_id, card.id, card_number, data.folder_path)
 
     return {"message": f"Import started: {count} images", "total": count, "card_id": card.id}
 
@@ -309,13 +352,7 @@ def get_photo(photo_id: int, db: Session = Depends(get_db), _=Depends(_tri_user)
 
 @router.post("/photos/{photo_id}/rotate")
 def rotate_photo(photo_id: int, db: Session = Depends(get_db), _=Depends(_tri_user)):
-    """Rotate a photo 90° clockwise and save to disk.
-
-    Uses Pillow to handle EXIF orientation correctly:
-    1. Apply any existing EXIF orientation tag (so we work with the visual image)
-    2. Rotate 90° CW
-    3. Save without EXIF orientation tag (to avoid double-rotation in browsers)
-    """
+    """Rotate a photo 90° clockwise and save to disk."""
     from PIL import Image, ImageOps
 
     photo = db.query(Photo).filter(Photo.id == photo_id).first()
@@ -327,25 +364,18 @@ def rotate_photo(photo_id: int, db: Session = Depends(get_db), _=Depends(_tri_us
         raise HTTPException(status_code=404, detail="File not found on disk")
 
     img = Image.open(str(filepath))
-
-    # Apply EXIF orientation so we rotate the visually correct image
     img = ImageOps.exif_transpose(img)
-
-    # Rotate 90° CW (Pillow uses counter-clockwise, so -90 = 270)
     rotated = img.rotate(-90, expand=True)
 
-    # Strip EXIF orientation tag to prevent browsers from re-applying it
     exif = rotated.getexif()
-    if 0x0112 in exif:  # Orientation tag
+    if 0x0112 in exif:
         del exif[0x0112]
 
-    # Save with original quality
     save_kwargs = {"quality": 95}
     if filepath.suffix.lower() in (".jpg", ".jpeg"):
         save_kwargs["exif"] = exif.tobytes() if exif else b""
     rotated.save(str(filepath), **save_kwargs)
 
-    # Update dimensions in DB
     photo.width = rotated.width
     photo.height = rotated.height
     db.commit()
