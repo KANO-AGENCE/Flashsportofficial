@@ -16,22 +16,34 @@ router = APIRouter(prefix="/api/events", tags=["processing"])
 
 _tri_user = require_module("TRI")
 
-# Track running tasks: stores tuples like ("event", event_id) or ("card", card_id)
-_running: set[tuple] = set()
+# Track running tasks with their threads to detect dead threads
+_running: dict[tuple, threading.Thread] = {}
 _running_lock = threading.Lock()
 
 
 def _is_event_busy(event_id: int) -> bool:
-    """Check if any processing is running for this event (global or any card)."""
-    for key in _running:
-        if key == ("event", event_id):
-            return True
-    return False
+    """Check if processing is running for this event. Auto-cleans dead threads."""
+    key = ("event", event_id)
+    t = _running.get(key)
+    if t is None:
+        return False
+    if not t.is_alive():
+        logger.warning(f"Dead processing thread detected for event {event_id}, cleaning up")
+        del _running[key]
+        return False
+    return True
 
 
 def _is_card_busy(card_id: int) -> bool:
     """Check if this specific card is being processed."""
-    return ("card", card_id) in _running
+    key = ("card", card_id)
+    t = _running.get(key)
+    if t is None:
+        return False
+    if not t.is_alive():
+        del _running[key]
+        return False
+    return True
 
 
 def _run_processing(event_id: int):
@@ -45,7 +57,7 @@ def _run_processing(event_id: int):
     finally:
         db.close()
         with _running_lock:
-            _running.discard(("event", event_id))
+            _running.pop(("event", event_id), None)
 
 
 def _run_card_processing(event_id: int, card_id: int):
@@ -59,7 +71,7 @@ def _run_card_processing(event_id: int, card_id: int):
     finally:
         db.close()
         with _running_lock:
-            _running.discard(("card", card_id))
+            _running.pop(("card", card_id), None)
 
 
 def _start_event_processing(event_id: int, db: Session) -> ProcessResponse:
@@ -88,10 +100,12 @@ def _start_event_processing(event_id: int, db: Session) -> ProcessResponse:
                 total=total,
                 already_processed=already,
             )
-        _running.add(("event", event_id))
+        _running[("event", event_id)] = None
 
     t = threading.Thread(target=_run_processing, args=(event_id,), daemon=True)
     t.start()
+    with _running_lock:
+        _running[("event", event_id)] = t
 
     return ProcessResponse(
         message=f"Processing started for {pending} photos",
@@ -138,10 +152,12 @@ def trigger_card_processing(
         # Block if this specific card is already being processed
         if _is_card_busy(card_id):
             return ProcessResponse(message="This card is already being processed", total=total, already_processed=already)
-        _running.add(("card", card_id))
+        _running[("card", card_id)] = None
 
     t = threading.Thread(target=_run_card_processing, args=(event_id, card_id), daemon=True)
     t.start()
+    with _running_lock:
+        _running[("card", card_id)] = t
 
     return ProcessResponse(message=f"Processing started for {pending} photos on card {card.name}", total=total, already_processed=already)
 
@@ -163,7 +179,7 @@ def stop_event(event_id: int, db: Session = Depends(get_db), _=Depends(_tri_user
         card_ids = [c.id for c in db.query(Card.id).filter(Card.event_id == event_id).all()]
         to_remove += [k for k in _running if k[0] == "card" and k[1] in card_ids]
         for k in to_remove:
-            _running.discard(k)
+            _running.pop(k, None)
 
     logger.info(f"STOP requested for event {event_id}")
     return {"message": f"Stop signal sent for event {event_id}"}

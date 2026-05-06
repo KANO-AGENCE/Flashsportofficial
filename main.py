@@ -51,6 +51,7 @@ app = FastAPI(
     version="2.0.0",
 )
 
+
 # Security headers
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):

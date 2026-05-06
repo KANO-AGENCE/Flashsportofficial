@@ -8,129 +8,68 @@ from sqlalchemy.orm import Session
 
 from app.db.database import SessionLocal
 from app.models.models import BibGroup, Detection, Photo, Event
-from app.services.detection import detect_persons
 from app.services.ocr_gpt import apply_rotation
-from app.services.ocr_qwen import detect_rotation_qwen, read_bib_qwen
+from app.services.ocr_qwen import detect_rotation_qwen, analyze_photo_qwen
 from app.services.orientation import auto_orient
-from app.services.quality import is_blurry, is_person_cut, compute_framing_score
+from app.services.quality import is_blurry
 from app.services.scoring import classify, compute_overall_score
 from config import settings
 
 logger = logging.getLogger(__name__)
 
-# 2 workers: best balance between parallelism and GPU saturation on Apple Silicon
-WORKERS = 2
-
-
-def _detect_person_from_array(img: np.ndarray) -> dict | None:
-    """Run YOLO on in-memory image (avoids re-reading from disk)."""
-    model = None
-    try:
-        from app.services.detection import get_model
-        model = get_model()
-    except Exception:
-        return None
-
-    results = model.predict(img, conf=settings.yolo_confidence, verbose=False)
-    persons = []
-    for result in results:
-        for box in result.boxes:
-            if int(box.cls[0]) != 0:
-                continue
-            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-            w, h = x2 - x1, y2 - y1
-            persons.append({
-                "bbox": (x1, y1, w, h),
-                "confidence": float(box.conf[0]),
-                "area": w * h,
-            })
-    persons.sort(key=lambda p: p["area"], reverse=True)
-    return persons[0] if persons else None
-
-
-def _read_bib_with_fallback(
-    img: np.ndarray,
-    person_bbox: tuple[int, int, int, int],
-    min_digits: int,
-    max_digits: int,
-) -> tuple[str | None, float]:
-    """Read bib number: Qwen local first, PaddleOCR fallback if Qwen fails or returns None."""
-    # Try Qwen local first
-    bib_number, confidence = read_bib_qwen(img, person_bbox, min_digits, max_digits)
-    if bib_number is not None:
-        return bib_number, confidence
-
-    # Fallback: PaddleOCR local
-    try:
-        from app.services.detection import extract_bib_regions
-        from app.services.ocr import find_best_bib
-        regions = extract_bib_regions(img, person_bbox)
-        bib, ocr_conf, _ = find_best_bib(img, regions, min_digits, max_digits, person_bbox)
-        if bib is not None:
-            logger.info(f"PaddleOCR fallback found bib: {bib} (conf={ocr_conf:.2f})")
-            return bib, ocr_conf
-    except Exception as e:
-        logger.warning(f"PaddleOCR fallback failed: {e}")
-
-    return None, 0.0
+# 1 worker for local Qwen (GPU-bound). Increase on servers with more resources.
+WORKERS = 1
 
 
 def _analyze_photo(filepath: str, blur_threshold: float, bib_min: int, bib_max: int) -> dict:
     """
-    Flow:
+    Qwen-only pipeline:
     1. Load + EXIF orient
-    2. GPT detects correct rotation
-    3. Rotate if needed + single disk write
-    4. YOLO detect person (in-memory, no re-read)
-    5. Blur check
-    6. Cut check
-    7. Bib read (GPT + PaddleOCR fallback)
+    2. Qwen full analysis (person, bibs, blur hint)
+    3. If no person found, try rotation + re-analyze
+    4. OpenCV blur check (more reliable than Qwen for blur)
+    5. Classification
     """
     # === STEP 1: Load image with EXIF auto-orient ===
     img = auto_orient(filepath)
     if img is None:
         return {"classification": "mauvais"}
 
-    # === STEP 2: YOLO person detection first (fast, no AI call) ===
-    person = _detect_person_from_array(img)
+    # === STEP 2: Qwen full analysis ===
+    qwen_result = analyze_photo_qwen(img, bib_min, bib_max)
 
-    # === STEP 3: If no person found, try rotation with Qwen ===
-    if person is None:
+    # === STEP 3: If no person found, try rotation ===
+    if not qwen_result["person_detected"]:
         logger.info(f"No person found, trying rotation: {filepath}")
         degrees = detect_rotation_qwen(img)
         if degrees != 0:
             img = apply_rotation(img, degrees)
-            logger.info(f"Rotated {degrees}°, retrying YOLO: {filepath}")
-            person = _detect_person_from_array(img)
+            logger.info(f"Rotated {degrees}, re-analyzing: {filepath}")
+            qwen_result = analyze_photo_qwen(img, bib_min, bib_max)
 
     # Save corrected image
     cv2.imwrite(filepath, img)
 
-    if person is None:
-        return {"classification": "mauvais", "new_width": img.shape[1], "new_height": img.shape[0]}
-
-    # === STEP 5: Blur check ===
-    blurry, blur_score = is_blurry(img, threshold=blur_threshold)
-
-    # === STEP 6: Cut check (on upright image) ===
-    if is_person_cut(img.shape, person["bbox"]):
+    if not qwen_result["person_detected"]:
         return {
-            "classification": "coupe",
-            "confidence_detection": person["confidence"],
-            "bbox": person["bbox"],
-            "blur_score": blur_score,
+            "classification": "mauvais",
             "new_width": img.shape[1],
             "new_height": img.shape[0],
         }
 
-    # === STEP 7: Bib read (GPT + PaddleOCR fallback) ===
-    bib_number, ocr_confidence = _read_bib_with_fallback(
-        img, person["bbox"], bib_min, bib_max,
-    )
+    # === STEP 4: OpenCV blur check (more reliable) ===
+    blurry, blur_score = is_blurry(img, threshold=blur_threshold)
 
-    framing_score = compute_framing_score(img.shape, person["bbox"])
+    # === STEP 5: Build result for each bib (or single detection) ===
+    bib_numbers = qwen_result["bib_numbers"]
+    bib_number = bib_numbers[0] if bib_numbers else None
+    ocr_confidence = 0.85 if bib_number else 0.0
+    detection_confidence = 0.90  # Qwen detected a person
+
+    # No bbox from Qwen, use defaults for scoring
+    framing_score = 0.70
     overall = compute_overall_score(
-        person["confidence"], ocr_confidence, blur_score, framing_score
+        detection_confidence, ocr_confidence, blur_score, framing_score
     )
     cat = classify(overall)
 
@@ -142,9 +81,10 @@ def _analyze_photo(filepath: str, blur_threshold: float, bib_min: int, bib_max: 
     return {
         "classification": cat,
         "bib_number": bib_number,
-        "confidence_detection": person["confidence"],
+        "extra_bibs": bib_numbers[1:] if len(bib_numbers) > 1 else [],
+        "confidence_detection": detection_confidence,
         "confidence_ocr": ocr_confidence,
-        "bbox": person["bbox"],
+        "bbox": (0, 0, 0, 0),  # No bbox from Qwen
         "blur_score": blur_score,
         "framing_score": framing_score,
         "overall_score": overall,
@@ -182,6 +122,13 @@ def _save_result(db: Session, photo_id: int, result: dict) -> None:
     else:
         detection = Detection(photo_id=photo_id, **values)
         db.add(detection)
+
+    # Save extra bibs as additional detections
+    for extra_bib in result.get("extra_bibs", []):
+        extra_values = dict(values)
+        extra_values["bib_number"] = extra_bib
+        extra_det = Detection(photo_id=photo_id, **extra_values)
+        db.add(extra_det)
 
 
 def _process_photos(

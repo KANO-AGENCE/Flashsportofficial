@@ -1,11 +1,13 @@
 """
 Vision IA locale via Qwen2.5-VL (Ollama).
-Remplace temporairement GPT-4o pour la rotation et GPT-4o-mini pour la lecture de bibs.
-Ne recoit que des crops/thumbnails, jamais la photo complete.
+Modele unique pour toute l'analyse : rotation, detection de personnes,
+lecture de dossards. Remplace YOLO + GPT-4o.
 """
 
 import base64
+import json
 import logging
+import os
 import re
 import time
 
@@ -16,7 +18,8 @@ import requests
 logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = "http://localhost:11434"
-QWEN_MODEL = "qwen2.5vl:7b"
+# Use 3b for Mac mini, 7b for servers with more RAM/GPU
+QWEN_MODEL = os.environ.get("QWEN_MODEL", "qwen2.5vl:3b")
 
 
 def _ensure_model_available() -> bool:
@@ -45,164 +48,160 @@ def _ensure_model_available() -> bool:
         return False
 
 
-def _encode_image(image: np.ndarray) -> str:
-    """Encode a cv2 image to base64 JPEG."""
+def _encode_image(image: np.ndarray, max_dim: int = 512) -> str:
+    """Encode a cv2 image to base64 JPEG, resized to max_dim."""
+    h, w = image.shape[:2]
+    if max(h, w) > max_dim:
+        scale = max_dim / max(h, w)
+        image = cv2.resize(image, (int(w * scale), int(h * scale)))
     _, buffer = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 85])
     return base64.b64encode(buffer).decode("utf-8")
 
 
+def _call_qwen(prompt: str, b64_image: str, num_predict: int = 100, timeout: int = 60) -> str | None:
+    """Send a prompt + image to Qwen via Ollama. Returns raw response text."""
+    try:
+        if not _ensure_model_available():
+            return None
+
+        resp = requests.post(
+            f"{OLLAMA_BASE_URL}/api/generate",
+            json={
+                "model": QWEN_MODEL,
+                "prompt": prompt,
+                "images": [b64_image],
+                "stream": False,
+                "options": {
+                    "temperature": 0,
+                    "num_predict": num_predict,
+                },
+            },
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        return resp.json().get("response", "").strip()
+    except requests.ConnectionError:
+        logger.error("Qwen: Ollama not reachable. Is 'ollama serve' running?")
+        return None
+    except requests.Timeout:
+        logger.error("Qwen: timeout")
+        return None
+    except Exception as e:
+        logger.error(f"Qwen error: {e}")
+        return None
+
+
 def detect_rotation_qwen(image: np.ndarray) -> int:
     """
-    Use Qwen2.5-VL local to determine image rotation.
+    Use Qwen2.5-VL to determine image rotation.
     Sends a 384px thumbnail.
     Returns rotation in degrees clockwise: 0, 90, 180, or 270.
     """
     t_start = time.time()
+    b64 = _encode_image(image, max_dim=384)
 
-    h, w = image.shape[:2]
-    max_dim = 384
-    scale = max_dim / max(h, w)
-    thumb = cv2.resize(image, (int(w * scale), int(h * scale)))
-    b64 = _encode_image(thumb)
+    answer = _call_qwen(
+        "This is a sports race photo. Are people standing upright "
+        "(head at top, feet at bottom)? If not, how many degrees clockwise "
+        "should I rotate? Answer with ONLY one number: 0, 90, 180, or 270.",
+        b64,
+        num_predict=5,
+        timeout=30,
+    )
 
-    try:
-        if not _ensure_model_available():
-            logger.error("Qwen rotation: model not available, defaulting to 0")
-            return 0
+    elapsed = time.time() - t_start
 
-        resp = requests.post(
-            f"{OLLAMA_BASE_URL}/api/generate",
-            json={
-                "model": QWEN_MODEL,
-                "prompt": (
-                    "This is a sports race photo. Are people standing upright "
-                    "(head at top, feet at bottom)? If not, how many degrees clockwise "
-                    "should I rotate? Answer with ONLY one number: 0, 90, 180, or 270."
-                ),
-                "images": [b64],
-                "stream": False,
-                "options": {
-                    "temperature": 0,
-                    "num_predict": 5,
-                },
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        answer = data.get("response", "").strip()
-        elapsed = time.time() - t_start
-
-        logger.info(f"Qwen rotation raw response: '{answer}' ({elapsed:.2f}s)")
-
-        digits = re.sub(r"[^0-9]", "", answer)
-        if not digits:
-            logger.warning(f"Qwen rotation: no digits in '{answer}', defaulting to 0 ({elapsed:.2f}s)")
-            return 0
-
-        degrees = int(digits)
-        if degrees in (0, 90, 180, 270):
-            logger.info(f"Qwen rotation: {degrees} deg ({elapsed:.2f}s)")
-            return degrees
-
-        logger.warning(f"Qwen rotation: unexpected '{answer}', defaulting to 0 ({elapsed:.2f}s)")
+    if not answer:
+        logger.warning(f"Qwen rotation: no response ({elapsed:.2f}s)")
         return 0
 
-    except Exception as e:
-        elapsed = time.time() - t_start
-        logger.error(f"Qwen rotation error: {e} ({elapsed:.2f}s)")
+    logger.info(f"Qwen rotation raw: '{answer}' ({elapsed:.2f}s)")
+
+    digits = re.sub(r"[^0-9]", "", answer)
+    if not digits:
         return 0
 
+    degrees = int(digits)
+    if degrees in (0, 90, 180, 270):
+        return degrees
 
-def read_bib_qwen(
+    logger.warning(f"Qwen rotation: unexpected '{answer}', defaulting to 0")
+    return 0
+
+
+def analyze_photo_qwen(
     image: np.ndarray,
-    person_bbox: tuple[int, int, int, int],
     min_digits: int = 1,
     max_digits: int = 5,
-) -> tuple[str | None, float]:
+) -> dict:
     """
-    Use Qwen2.5-VL local via Ollama to read the bib number.
-    Sends ONLY the cropped torso region, never the full photo.
-
-    Returns (bib_number, confidence).
+    Single Qwen call to analyze a sports photo.
+    Returns dict with:
+      - person_detected: bool
+      - bib_numbers: list[str]
+      - blurry: bool
     """
     t_start = time.time()
+    b64 = _encode_image(image, max_dim=512)
 
-    px, py, pw, ph = person_bbox
-    img_h, img_w = image.shape[:2]
+    prompt = (
+        "Analyse cette photo de course sportive. Reponds UNIQUEMENT en JSON strict, rien d'autre.\n"
+        "Format exact:\n"
+        '{"person": true/false, "bibs": ["123", "456"], "blurry": true/false}\n\n'
+        "- person: y a-t-il au moins une personne/coureur visible?\n"
+        "- bibs: liste des numeros de dossard lisibles (chiffres uniquement). Liste vide si aucun dossard visible.\n"
+        "- blurry: l'image est-elle floue?\n"
+        "Reponds UNIQUEMENT avec le JSON, sans explication."
+    )
 
-    # Crop generous torso region (top 10% to bottom 65% of person)
-    crop_y1 = max(0, py + int(ph * 0.10))
-    crop_y2 = min(img_h, py + int(ph * 0.65))
-    crop_x1 = max(0, px - int(pw * 0.05))
-    crop_x2 = min(img_w, px + pw + int(pw * 0.05))
+    answer = _call_qwen(prompt, b64, num_predict=100, timeout=60)
+    elapsed = time.time() - t_start
 
-    crop = image[crop_y1:crop_y2, crop_x1:crop_x2]
-    if crop.size == 0:
-        logger.warning("Qwen OCR: empty crop, skipping")
-        return None, 0.0
+    result = {"person_detected": False, "bib_numbers": [], "blurry": False}
 
-    # Resize if too large
-    max_dim = 512
-    h, w = crop.shape[:2]
-    if max(h, w) > max_dim:
-        scale = max_dim / max(h, w)
-        crop = cv2.resize(crop, (int(w * scale), int(h * scale)))
+    if not answer:
+        logger.warning(f"Qwen analyze: no response ({elapsed:.2f}s)")
+        return result
 
-    b64 = _encode_image(crop)
+    logger.info(f"Qwen analyze raw: '{answer}' ({elapsed:.2f}s)")
 
+    # Try to parse JSON from response
     try:
-        if not _ensure_model_available():
-            logger.error("Qwen OCR: model not available, skipping")
-            return None, 0.0
+        # Extract JSON from response (might have extra text around it)
+        json_match = re.search(r'\{[^{}]*\}', answer)
+        if json_match:
+            data = json.loads(json_match.group())
+        else:
+            data = json.loads(answer)
 
-        resp = requests.post(
-            f"{OLLAMA_BASE_URL}/api/generate",
-            json={
-                "model": QWEN_MODEL,
-                "prompt": (
-                    "Lis uniquement le numero du dossard visible. "
-                    "Reponds uniquement avec les chiffres. "
-                    "Aucun texte supplementaire."
-                ),
-                "images": [b64],
-                "stream": False,
-                "options": {
-                    "temperature": 0,
-                    "num_predict": 20,
-                },
-            },
-            timeout=60,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        answer = data.get("response", "").strip()
-        elapsed = time.time() - t_start
+        result["person_detected"] = bool(data.get("person", False))
+        result["blurry"] = bool(data.get("blurry", False))
 
-        logger.info(f"Qwen OCR raw response: '{answer}' ({elapsed:.2f}s)")
+        # Parse bib numbers
+        raw_bibs = data.get("bibs", [])
+        if isinstance(raw_bibs, list):
+            for bib in raw_bibs:
+                digits = re.sub(r"[^0-9]", "", str(bib))
+                if digits and min_digits <= len(digits) <= max_digits:
+                    result["bib_numbers"].append(digits)
+        elif isinstance(raw_bibs, str):
+            digits = re.sub(r"[^0-9]", "", raw_bibs)
+            if digits and min_digits <= len(digits) <= max_digits:
+                result["bib_numbers"].append(digits)
 
-        if not answer:
-            logger.info(f"Qwen OCR: empty response ({elapsed:.2f}s)")
-            return None, 0.0
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning(f"Qwen analyze: failed to parse JSON '{answer}': {e} ({elapsed:.2f}s)")
+        # Fallback: try to extract bib numbers from raw text
+        digits_found = re.findall(r'\b(\d{1,5})\b', answer)
+        for d in digits_found:
+            if min_digits <= len(d) <= max_digits:
+                result["bib_numbers"].append(d)
+        # If we got bibs, there's probably a person
+        if result["bib_numbers"]:
+            result["person_detected"] = True
 
-        # Extract digits only
-        digits = re.sub(r"[^0-9]", "", answer)
-        if not digits or len(digits) < min_digits or len(digits) > max_digits:
-            logger.info(f"Qwen OCR: invalid digits '{digits}' from '{answer}' ({elapsed:.2f}s)")
-            return None, 0.0
-
-        logger.info(f"Qwen OCR: bib={digits} ({elapsed:.2f}s)")
-        return digits, 0.85
-
-    except requests.ConnectionError:
-        elapsed = time.time() - t_start
-        logger.error(f"Qwen OCR: Ollama not reachable ({elapsed:.2f}s). Is 'ollama serve' running?")
-        return None, 0.0
-    except requests.Timeout:
-        elapsed = time.time() - t_start
-        logger.error(f"Qwen OCR: timeout after {elapsed:.2f}s")
-        return None, 0.0
-    except Exception as e:
-        elapsed = time.time() - t_start
-        logger.error(f"Qwen OCR error: {e} ({elapsed:.2f}s)")
-        return None, 0.0
+    logger.info(
+        f"Qwen analyze result: person={result['person_detected']} "
+        f"bibs={result['bib_numbers']} blurry={result['blurry']} ({elapsed:.2f}s)"
+    )
+    return result
