@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 from app.db.database import SessionLocal
 from app.models.models import BibGroup, Detection, Photo, Event
 from app.services.detection import detect_persons
-from app.services.ocr_gpt import detect_rotation_gpt, apply_rotation, read_bib_gpt
+from app.services.ocr_gpt import detect_rotation_gpt, apply_rotation
+from app.services.ocr_qwen import read_bib_qwen
 from app.services.orientation import auto_orient
 from app.services.quality import is_blurry, is_person_cut, compute_framing_score
 from app.services.scoring import classify, compute_overall_score
@@ -53,9 +54,9 @@ def _read_bib_with_fallback(
     min_digits: int,
     max_digits: int,
 ) -> tuple[str | None, float]:
-    """Read bib number: GPT first, PaddleOCR fallback if GPT fails or returns None."""
-    # Try GPT first
-    bib_number, confidence = read_bib_gpt(img, person_bbox, min_digits, max_digits)
+    """Read bib number: Qwen local first, PaddleOCR fallback if Qwen fails or returns None."""
+    # Try Qwen local first
+    bib_number, confidence = read_bib_qwen(img, person_bbox, min_digits, max_digits)
     if bib_number is not None:
         return bib_number, confidence
 
