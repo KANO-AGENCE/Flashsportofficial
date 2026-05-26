@@ -198,6 +198,12 @@ def read_bib_from_crop(
         logger.info(f"Qwen OCR: rejected '{bib}' (digit count {len(bib)} out of range {min_digits}-{max_digits})")
         return None, 0.0, answer
 
+    # Reject known hallucination patterns
+    HALLUCINATION_BIBS = {"1234", "12345", "1111", "0000", "9999", "123", "0001", "0123"}
+    if bib and bib in HALLUCINATION_BIBS:
+        logger.warning(f"Qwen OCR: rejected hallucination '{bib}' ({elapsed:.2f}s)")
+        return None, 0.0, answer
+
     if bib:
         logger.info(f"Qwen OCR: bib={bib} ({elapsed:.2f}s)")
         return bib, 0.85, answer

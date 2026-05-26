@@ -16,6 +16,7 @@ export const photosApi = {
     const params = cardId ? `?card_id=${cardId}` : ''
     return api.post(`/events/${eventId}/photos${params}`, form, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 5 * 60 * 1000, // 5 min per batch
     })
   },
   importFolder(eventId, folderPath, cardName = null) {
@@ -49,7 +50,7 @@ export const photosApi = {
     return api.post(`/events/${eventId}/cards`, { name })
   },
   deleteCard(cardId) {
-    return api.delete(`/cards/${cardId}`)
+    return api.delete(`/cards/${cardId}`, { timeout: 60000 })
   },
   publishToWeb(eventId) {
     return api.post('/web/publish', { event_id: eventId })

@@ -50,6 +50,12 @@ const routes = [
         component: () => import('../views/tri/TriToolsView.vue'),
         meta: { module: 'TRI' },
       },
+      {
+        path: 'tri/training',
+        name: 'tri-training',
+        component: () => import('../views/tri/TrainingCenterView.vue'),
+        meta: { module: 'TRI' },
+      },
       // WEB module
       {
         path: 'web',

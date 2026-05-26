@@ -120,6 +120,13 @@ class DetectionOut(BaseModel):
     validated_class: str | None
     fallback_used: bool = False
     ocr_raw_response: str | None = None
+    # Multi-person
+    status: str = "pending"
+    person_index: int = 0
+    main_subject_score: float = 0.0
+    is_primary_subject: bool = True
+    is_usable_subject: bool = True
+    should_publish: bool = True
 
     class Config:
         from_attributes = True
@@ -163,6 +170,8 @@ class ProcessStatus(BaseModel):
 class ValidationUpdate(BaseModel):
     validated_bib: str | None = None
     validated_class: str | None = None
+    should_publish: bool | None = None
+    status: str | None = None
 
 
 # --- BibGroups ---

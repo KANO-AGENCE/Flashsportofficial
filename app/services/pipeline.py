@@ -62,6 +62,26 @@ def _detect_persons_from_array(img: np.ndarray, confidence: float = 0.35) -> lis
     return persons
 
 
+def _upright_score(persons: list[dict]) -> float:
+    """
+    Score how 'upright' detected persons are.
+    A standing person has bbox height > width (ratio > 1).
+    Returns average (h/w ratio * confidence). Higher = more upright.
+    Returns -1 if no persons.
+    """
+    if not persons:
+        return -1.0
+    total = 0.0
+    for p in persons:
+        _, _, w, h = p["bbox"]
+        if w > 0:
+            ratio = h / w  # Standing person: ratio > 1.0
+            total += ratio * p["confidence"]
+        else:
+            total += 0.0
+    return total / len(persons)
+
+
 def _crop_torso(img: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray:
     """Extract torso region from person bbox for bib OCR."""
     img_h, img_w = img.shape[:2]
@@ -73,6 +93,50 @@ def _crop_torso(img: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray:
     crop_x2 = min(img_w, px + pw + int(pw * 0.05))
     crop = img[crop_y1:crop_y2, crop_x1:crop_x2]
     return crop if crop.size > 0 else np.array([])
+
+
+def _compute_main_subject_score(
+    img_shape: tuple[int, ...],
+    bbox: tuple[int, int, int, int],
+    yolo_conf: float,
+    blur_score: float,
+    all_persons: list[dict],
+) -> float:
+    """
+    Score how important this person is as the photo's main subject.
+    0.0 = background noise, 1.0 = clearly the main subject.
+    Based on: bbox size, center proximity, sharpness, YOLO confidence.
+    """
+    img_h, img_w = img_shape[:2]
+    px, py, pw, ph = bbox
+    if img_w == 0 or img_h == 0:
+        return 0.0
+
+    # Size ratio (bigger = more important)
+    area_ratio = (pw * ph) / (img_w * img_h)
+    size_score = min(1.0, area_ratio / 0.3)  # 30% of image = score 1.0
+
+    # Center proximity (center of bbox vs center of image)
+    cx = (px + pw / 2) / img_w
+    cy = (py + ph / 2) / img_h
+    dist_from_center = ((cx - 0.5) ** 2 + (cy - 0.5) ** 2) ** 0.5
+    center_score = max(0.0, 1.0 - dist_from_center * 2)
+
+    # Sharpness (higher blur_score = sharper)
+    sharp_score = min(1.0, blur_score / 200.0)
+
+    # Relative size (biggest person gets bonus)
+    max_area = max(p["area"] for p in all_persons) if all_persons else 1
+    relative_size = (pw * ph) / max_area if max_area > 0 else 0.0
+
+    score = (
+        size_score * 0.35 +
+        center_score * 0.20 +
+        sharp_score * 0.15 +
+        yolo_conf * 0.15 +
+        relative_size * 0.15
+    )
+    return round(min(1.0, score), 4)
 
 
 def _build_context_hint(event: Event | None) -> str:
@@ -117,66 +181,89 @@ def _validate_bib_against_known(bib: str | None, known_bibs: set[str]) -> str | 
     return bib
 
 
-def _analyze_photo(
-    filepath: str,
+def _process_single_person(
+    img: np.ndarray,
+    person: dict,
+    person_index: int,
+    all_persons: list[dict],
     blur_threshold: float,
     bib_min: int,
     bib_max: int,
-    yolo_confidence: float,
     precision_mode: bool,
     context_hint: str,
     known_bibs: set[str],
 ) -> dict:
-    """
-    Hybrid pipeline — FIABILITÉ > VITESSE.
+    """Process a single YOLO-detected person: OCR, blur, scoring. Returns detection dict."""
+    bbox = person["bbox"]
+    detection_conf = person["confidence"]
 
-    1. EXIF orient
-    2. YOLO detect persons
-    3. If persons: crop → Qwen OCR on each
-    4. If no person: Qwen rotation → re-YOLO → fallback
-    5. OpenCV blur check
-    6. Known bibs validation
-    7. Scoring
-    """
-    t_start = time.time()
+    # ============================================================
+    # ADVANCED SUBJECT FILTERING — photographer's eye gate
+    # ============================================================
+    subject_quality = None
+    is_usable_subject = True  # default: all pass (flag off)
 
-    # === STEP 1: Load + EXIF orient ===
-    img = auto_orient(filepath)
-    if img is None:
-        return {"classification": "mauvais", "processing_time": time.time() - t_start}
+    if settings.advanced_subject_filtering_enabled:
+        from app.services.subject_filter import compute_subject_quality, log_subject_quality
+        subject_quality = compute_subject_quality(
+            img, bbox, detection_conf, all_persons, blur_threshold,
+        )
+        is_usable_subject = subject_quality["is_usable"]
+        log_subject_quality(person_index, subject_quality)
 
-    # === STEP 2: YOLO person detection ===
-    persons = _detect_persons_from_array(img, confidence=yolo_confidence)
+        if not is_usable_subject:
+            # Skip OCR entirely — not a real photo subject
+            blurry, blur_score = is_blurry(img, threshold=blur_threshold, person_bbox=bbox)
+            cut = is_person_cut(img.shape, bbox)
+            framing_score = compute_framing_score(img.shape, bbox)
 
-    # === STEP 3: If no person, try rotation ===
-    rotated = False
-    if not persons:
-        logger.info(f"No person found, trying rotation: {filepath}")
-        degrees = detect_rotation_qwen(img)
-        if degrees != 0:
-            img = apply_rotation(img, degrees)
-            rotated = True
-            logger.info(f"Rotated {degrees}°, re-running YOLO: {filepath}")
-            persons = _detect_persons_from_array(img, confidence=yolo_confidence)
+            if cut:
+                cat = "coupe"
+            elif blurry:
+                cat = "flou"
+            else:
+                cat = "mauvais"
 
-    # Save corrected image (only if rotated)
-    if rotated:
-        cv2.imwrite(filepath, img)
+            overall = compute_overall_score(detection_conf, 0.0, blur_score, framing_score)
 
-    # === STEP 4: Process detected persons OR fallback ===
-    if persons:
-        # Process the main (biggest) person
-        main_person = persons[0]
-        bbox = main_person["bbox"]
-        detection_conf = main_person["confidence"]
+            return {
+                "bib_number": None,
+                "confidence_detection": detection_conf,
+                "confidence_ocr": 0.0,
+                "bbox": bbox,
+                "blur_score": blur_score,
+                "framing_score": framing_score,
+                "overall_score": overall,
+                "classification": cat,
+                "fallback_used": False,
+                "ocr_raw_response": f"subject_filter: {subject_quality['reason']}",
+                "person_index": person_index,
+                "main_subject_score": subject_quality["score"],
+                "is_primary_subject": False,
+                "is_usable_subject": False,
+                "should_publish": False,
+                "status": "background_runner",
+            }
 
-        # Crop torso for bib OCR
+    # ============================================================
+    # OCR — only reached for usable subjects
+    # ============================================================
+    bib_number = None
+    ocr_conf = 0.0
+    ocr_raw = ""
+
+    if settings.advanced_ocr_enabled:
+        # === Advanced OCR: has_bib gate + multi-crop + consensus ===
+        from app.services.ocr_advanced import advanced_ocr_person
+        adv = advanced_ocr_person(
+            img, bbox, bib_min, bib_max, context_hint, known_bibs,
+        )
+        bib_number = adv["bib_number"]
+        ocr_conf = adv["confidence_ocr"]
+        ocr_raw = adv.get("ocr_raw_response", "")
+    else:
+        # === Original OCR pipeline (unchanged) ===
         crop = _crop_torso(img, bbox)
-
-        bib_number = None
-        ocr_conf = 0.0
-        ocr_raw = ""
-        fallback_used = False
 
         if crop.size > 0:
             bib_number, ocr_conf, ocr_raw = read_bib_from_crop(
@@ -196,165 +283,236 @@ def _analyze_photo(
         # Validate against known bibs
         bib_number = _validate_bib_against_known(bib_number, known_bibs)
 
-        # Blur check
-        blurry, blur_score = is_blurry(img, threshold=blur_threshold)
+    # Blur check (on person region only)
+    blurry, blur_score = is_blurry(img, threshold=blur_threshold, person_bbox=bbox)
 
-        # Cut check
-        cut = is_person_cut(img.shape, bbox)
+    # Cut check
+    cut = is_person_cut(img.shape, bbox)
 
-        # Framing
-        framing_score = compute_framing_score(img.shape, bbox)
+    # Framing
+    framing_score = compute_framing_score(img.shape, bbox)
 
-        # Classification
-        if cut:
-            cat = "coupe"
-        elif blurry and bib_number is None:
-            cat = "flou"
-        elif bib_number is None:
-            cat = "incertain"
-        else:
-            overall = compute_overall_score(detection_conf, ocr_conf, blur_score, framing_score)
-            cat = classify(overall)
+    # Main subject score — use subject_quality if available, else legacy
+    if subject_quality:
+        main_subject_score = subject_quality["score"]
+    else:
+        main_subject_score = _compute_main_subject_score(
+            img.shape, bbox, detection_conf, blur_score, all_persons
+        )
 
+    # Is this a primary subject? Top 2 by area, or >40% of max area
+    max_area = max(p["area"] for p in all_persons) if all_persons else 1
+    is_primary = person_index < 2 or (person["area"] / max_area > 0.4)
+
+    # Classification per detection
+    if cut:
+        cat = "coupe"
+    elif blurry and bib_number is None:
+        cat = "flou"
+    elif bib_number is None:
+        cat = "incertain"
+    else:
         overall = compute_overall_score(detection_conf, ocr_conf, blur_score, framing_score)
+        cat = classify(overall)
 
-        result = {
-            "classification": cat,
-            "bib_number": bib_number,
-            "confidence_detection": detection_conf,
-            "confidence_ocr": ocr_conf,
-            "bbox": bbox,
-            "blur_score": blur_score,
-            "framing_score": framing_score,
-            "overall_score": overall,
-            "fallback_used": fallback_used,
-            "ocr_raw_response": ocr_raw[:200] if ocr_raw else None,
-            "new_width": img.shape[1],
-            "new_height": img.shape[0],
+    overall = compute_overall_score(detection_conf, ocr_conf, blur_score, framing_score)
+
+    # Status assignment
+    if bib_number:
+        status = "pending"  # has bib, awaiting validation
+    elif is_primary:
+        status = "no_bib"  # important person, no bib read
+    else:
+        status = "background_runner"  # small/background, no bib
+
+    # Should publish: primary subjects with bibs always, background runners with bibs too
+    should_publish = bib_number is not None
+
+    return {
+        "bib_number": bib_number,
+        "confidence_detection": detection_conf,
+        "confidence_ocr": ocr_conf,
+        "bbox": bbox,
+        "blur_score": blur_score,
+        "framing_score": framing_score,
+        "overall_score": overall,
+        "classification": cat,
+        "fallback_used": False,
+        "ocr_raw_response": ocr_raw[:200] if ocr_raw else None,
+        "person_index": person_index,
+        "main_subject_score": main_subject_score,
+        "is_primary_subject": is_primary,
+        "is_usable_subject": is_usable_subject,
+        "should_publish": should_publish,
+        "status": status,
+    }
+
+
+def _analyze_photo(
+    filepath: str,
+    blur_threshold: float,
+    bib_min: int,
+    bib_max: int,
+    yolo_confidence: float,
+    precision_mode: bool,
+    context_hint: str,
+    known_bibs: set[str],
+) -> dict:
+    """
+    Hybrid pipeline — FIABILITÉ > VITESSE.
+    Returns dict with 'detections' list (one per person) + image metadata.
+
+    1. EXIF orient
+    2. YOLO detect persons
+    3. Rotation correction if needed
+    4. Process EVERY detected person independently (OCR, blur, scoring)
+    5. Fallback if no person found
+    """
+    t_start = time.time()
+
+    # === STEP 1: Load + EXIF orient ===
+    img = auto_orient(filepath)
+    if img is None:
+        return {
+            "detections": [],
+            "new_width": 0, "new_height": 0,
             "processing_time": time.time() - t_start,
         }
 
-        # If multiple persons detected, add extra bibs
-        extra_bibs = []
-        if len(persons) > 1:
-            for extra_person in persons[1:]:
-                extra_crop = _crop_torso(img, extra_person["bbox"])
-                if extra_crop.size > 0:
-                    extra_bib, _, _ = read_bib_from_crop(
-                        extra_crop, bib_min, bib_max, context_hint
-                    )
-                    if extra_bib:
-                        extra_bib = _validate_bib_against_known(extra_bib, known_bibs)
-                        if extra_bib:
-                            extra_bibs.append({
-                                "bib_number": extra_bib,
-                                "bbox": extra_person["bbox"],
-                                "confidence_detection": extra_person["confidence"],
-                            })
+    # === STEP 2: YOLO person detection ===
+    persons = _detect_persons_from_array(img, confidence=yolo_confidence)
 
-        result["extra_detections"] = extra_bibs
-        return result
+    # === STEP 3: Check orientation using bbox aspect ratio ===
+    rotated = False
+    current_score = _upright_score(persons)
 
+    if current_score < 1.0:
+        logger.info(f"Upright score={current_score:.2f}, trying rotations: {filepath}")
+        original = auto_orient(filepath)
+        if original is not None:
+            best_rotation = 0
+            best_score = current_score
+            best_persons = persons
+
+            for test_deg in [90, 180, 270]:
+                test_img = apply_rotation(original, test_deg)
+                test_persons = _detect_persons_from_array(test_img, confidence=yolo_confidence)
+                test_score = _upright_score(test_persons)
+                logger.debug(f"Rotation {test_deg}°: {len(test_persons)} persons, upright={test_score:.2f}")
+                if test_score > best_score:
+                    best_score = test_score
+                    best_rotation = test_deg
+                    best_persons = test_persons
+
+            if best_rotation != 0:
+                img = apply_rotation(original, best_rotation)
+                persons = best_persons
+                rotated = True
+                logger.info(f"Best rotation={best_rotation}° upright={best_score:.2f} ({len(persons)} persons): {filepath}")
+
+    if rotated:
+        cv2.imwrite(filepath, img)
+
+    # === STEP 4: Process ALL detected persons independently ===
+    detections = []
+
+    if persons:
+        for idx, person in enumerate(persons):
+            det = _process_single_person(
+                img, person, idx, persons,
+                blur_threshold, bib_min, bib_max,
+                precision_mode, context_hint, known_bibs,
+            )
+            detections.append(det)
+            logger.info(
+                f"Person {idx}: bib={det['bib_number']} "
+                f"score={det['overall_score']:.3f} "
+                f"subject={det['main_subject_score']:.3f} "
+                f"primary={det['is_primary_subject']} "
+                f"status={det['status']}"
+            )
     else:
         # === FALLBACK: Qwen full-image analysis ===
         logger.info(f"YOLO found nothing, Qwen full-image fallback: {filepath}")
         qwen_result = fullimage_fallback(img, bib_min, bib_max)
 
-        fallback_used = True
         blurry, blur_score = is_blurry(img, threshold=blur_threshold)
 
-        if not qwen_result["person_detected"]:
-            return {
-                "classification": "mauvais",
+        if qwen_result["person_detected"]:
+            bib_number = qwen_result["bib_numbers"][0] if qwen_result["bib_numbers"] else None
+            bib_number = _validate_bib_against_known(bib_number, known_bibs)
+            ocr_conf = 0.70 if bib_number else 0.0
+            detection_conf = 0.60
+
+            overall = compute_overall_score(detection_conf, ocr_conf, blur_score, 0.50)
+
+            if blurry and bib_number is None:
+                cat = "flou"
+            elif bib_number is None:
+                cat = "incertain"
+            else:
+                cat = classify(overall)
+
+            detections.append({
+                "bib_number": bib_number,
+                "confidence_detection": detection_conf,
+                "confidence_ocr": ocr_conf,
+                "bbox": (0, 0, 0, 0),
                 "blur_score": blur_score,
+                "framing_score": 0.50,
+                "overall_score": overall,
+                "classification": cat,
                 "fallback_used": True,
-                "new_width": img.shape[1],
-                "new_height": img.shape[0],
-                "processing_time": time.time() - t_start,
-            }
+                "ocr_raw_response": qwen_result.get("raw", "")[:200],
+                "person_index": 0,
+                "main_subject_score": 0.5,
+                "is_primary_subject": True,
+                "should_publish": bib_number is not None,
+                "status": "pending" if bib_number else "no_bib",
+            })
+        # If Qwen finds no person either, detections stays empty
 
-        # Qwen found person(s) but YOLO didn't — lower confidence
-        bib_number = qwen_result["bib_numbers"][0] if qwen_result["bib_numbers"] else None
-        bib_number = _validate_bib_against_known(bib_number, known_bibs)
-        ocr_conf = 0.70 if bib_number else 0.0  # Lower confidence for fallback
-        detection_conf = 0.60  # Lower since YOLO missed it
-
-        overall = compute_overall_score(detection_conf, ocr_conf, blur_score, 0.50)
-
-        if blurry and bib_number is None:
-            cat = "flou"
-        elif bib_number is None:
-            cat = "incertain"
-        else:
-            cat = classify(overall)
-
-        return {
-            "classification": cat,
-            "bib_number": bib_number,
-            "confidence_detection": detection_conf,
-            "confidence_ocr": ocr_conf,
-            "bbox": (0, 0, 0, 0),
-            "blur_score": blur_score,
-            "framing_score": 0.50,
-            "overall_score": overall,
-            "fallback_used": True,
-            "ocr_raw_response": qwen_result.get("raw", "")[:200],
-            "new_width": img.shape[1],
-            "new_height": img.shape[0],
-            "processing_time": time.time() - t_start,
-        }
+    return {
+        "detections": detections,
+        "new_width": img.shape[1],
+        "new_height": img.shape[0],
+        "processing_time": time.time() - t_start,
+    }
 
 
 def _save_result(db: Session, photo_id: int, result: dict) -> None:
-    """Save analysis result to DB (upsert)."""
-    bbox = result.get("bbox", (0, 0, 0, 0))
-    values = dict(
-        bib_number=result.get("bib_number"),
-        confidence_detection=round(result.get("confidence_detection", 0.0), 4),
-        confidence_ocr=round(result.get("confidence_ocr", 0.0), 4),
-        bbox_x=bbox[0],
-        bbox_y=bbox[1],
-        bbox_w=bbox[2],
-        bbox_h=bbox[3],
-        blur_score=round(result.get("blur_score", 0.0), 2),
-        framing_score=round(result.get("framing_score", 0.0), 4),
-        overall_score=round(result.get("overall_score", 0.0), 4),
-        classification=result["classification"],
-        fallback_used=result.get("fallback_used", False),
-        ocr_raw_response=result.get("ocr_raw_response"),
-    )
+    """Save analysis result to DB — one Detection per person detected."""
+    detections_data = result.get("detections", [])
 
-    # Upsert main detection
-    existing = db.query(Detection).filter(Detection.photo_id == photo_id).first()
-    if existing:
-        for k, v in values.items():
-            setattr(existing, k, v)
-        existing.validated = False
-        existing.validated_bib = None
-        existing.validated_class = None
-    else:
-        detection = Detection(photo_id=photo_id, **values)
-        db.add(detection)
+    # Clear previous detections for this photo (re-processing)
+    db.query(Detection).filter(Detection.photo_id == photo_id).delete()
 
-    # Save extra detections (multiple persons)
-    for extra in result.get("extra_detections", []):
-        extra_bbox = extra.get("bbox", (0, 0, 0, 0))
-        extra_det = Detection(
+    for det_data in detections_data:
+        bbox = det_data.get("bbox", (0, 0, 0, 0))
+        detection = Detection(
             photo_id=photo_id,
-            bib_number=extra["bib_number"],
-            confidence_detection=round(extra.get("confidence_detection", 0.0), 4),
-            confidence_ocr=0.85,
-            bbox_x=extra_bbox[0],
-            bbox_y=extra_bbox[1],
-            bbox_w=extra_bbox[2],
-            bbox_h=extra_bbox[3],
-            blur_score=round(result.get("blur_score", 0.0), 2),
-            framing_score=round(result.get("framing_score", 0.0), 4),
-            overall_score=round(result.get("overall_score", 0.0), 4),
-            classification=result["classification"],
-            fallback_used=False,
+            bib_number=det_data.get("bib_number"),
+            confidence_detection=round(det_data.get("confidence_detection", 0.0), 4),
+            confidence_ocr=round(det_data.get("confidence_ocr", 0.0), 4),
+            bbox_x=bbox[0],
+            bbox_y=bbox[1],
+            bbox_w=bbox[2],
+            bbox_h=bbox[3],
+            blur_score=round(det_data.get("blur_score", 0.0), 2),
+            framing_score=round(det_data.get("framing_score", 0.0), 4),
+            overall_score=round(det_data.get("overall_score", 0.0), 4),
+            classification=det_data.get("classification", "mauvais"),
+            fallback_used=det_data.get("fallback_used", False),
+            ocr_raw_response=det_data.get("ocr_raw_response"),
+            # Multi-person fields
+            status=det_data.get("status", "pending"),
+            person_index=det_data.get("person_index", 0),
+            main_subject_score=round(det_data.get("main_subject_score", 0.0), 4),
+            is_primary_subject=det_data.get("is_primary_subject", True),
+            is_usable_subject=det_data.get("is_usable_subject", True),
+            should_publish=det_data.get("should_publish", True),
         )
-        db.add(extra_det)
+        db.add(detection)
 
 
 def _process_photos(
@@ -418,11 +576,11 @@ def _process_photos(
                             updates[Photo.width] = result["new_width"]
                             updates[Photo.height] = result["new_height"]
                         db.query(Photo).filter(Photo.id == photo_id).update(updates)
+                        dets = result.get("detections", [])
+                        bibs = [d.get("bib_number") or "?" for d in dets]
                         logger.info(
-                            f"Photo {photo_id}: {result['classification']} "
-                            f"bib={result.get('bib_number')} "
-                            f"score={result.get('overall_score', 0):.3f} "
-                            f"fallback={'Y' if result.get('fallback_used') else 'N'} "
+                            f"Photo {photo_id}: {len(dets)} persons, "
+                            f"bibs={bibs} "
                             f"({result.get('processing_time', 0):.1f}s)"
                         )
                     else:
@@ -476,7 +634,8 @@ def process_event(event_id: int, db: Session) -> dict:
 
 def process_card(event_id: int, card_id: int, db: Session) -> dict:
     """Process only unprocessed photos from a specific card."""
-    from app.services.stop import should_stop_card, clear_stop_card
+    from app.services.stop import should_stop_card, clear_stop, clear_stop_card
+    clear_stop(event_id)      # Clear event-level flag (may be stale from delete_card)
     clear_stop_card(card_id)
 
     photos = db.query(Photo).filter(
@@ -501,7 +660,7 @@ def process_card(event_id: int, card_id: int, db: Session) -> dict:
 
 
 def rebuild_bib_groups(event_id: int, db: Session) -> None:
-    """Rebuild bib groups using SQL aggregation."""
+    """Rebuild bib groups — only indexes detections with should_publish=True."""
     from sqlalchemy import func as sqlfunc
 
     db.query(BibGroup).filter(BibGroup.event_id == event_id).delete()
@@ -516,6 +675,7 @@ def rebuild_bib_groups(event_id: int, db: Session) -> None:
         .join(Photo)
         .filter(
             Photo.event_id == event_id,
+            Detection.should_publish == True,
             effective_bib.isnot(None),
             effective_bib != "",
         )
@@ -529,6 +689,7 @@ def rebuild_bib_groups(event_id: int, db: Session) -> None:
             .join(Photo)
             .filter(
                 Photo.event_id == event_id,
+                Detection.should_publish == True,
                 sqlfunc.coalesce(Detection.validated_bib, Detection.bib_number) == row.bib,
             )
             .order_by(Detection.overall_score.desc())

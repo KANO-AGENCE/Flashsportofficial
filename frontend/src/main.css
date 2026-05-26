@@ -1,4 +1,5 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+@source "../**/*.{vue,js,ts,jsx,tsx}";
 
 /* Custom FlashSport theme */
 :root {

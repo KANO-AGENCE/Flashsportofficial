@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
 
     # Qwen / Ollama
-    qwen_model: str = "qwen2.5vl:7b"
+    qwen_model: str = "qwen2.5vl:3b"
     ollama_url: str = "http://localhost:11434"
 
     # Processing mode: "local" (Mac mini, slow, safe) or "server" (GPU, fast)
@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     yolo_enabled: bool = True
     qwen_enabled: bool = True
     ai_workers: int = 1
+
+    # Advanced OCR (consensus mode) — set to True to enable
+    advanced_ocr_enabled: bool = False
+
+    # Advanced subject filtering — photographer's eye filter before OCR
+    advanced_subject_filtering_enabled: bool = False
+    subject_min_quality: float = 0.25  # Below this = not a usable subject
 
     # Auth
     jwt_secret: str = "flashsport-local-secret-change-in-prod"

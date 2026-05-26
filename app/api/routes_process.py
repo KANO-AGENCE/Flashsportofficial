@@ -56,6 +56,8 @@ def _run_processing(event_id: int):
         logger.error(f"Event {event_id} processing error: {e}")
     finally:
         db.close()
+        from app.services.stop import clear_stop
+        clear_stop(event_id)
         with _running_lock:
             _running.pop(("event", event_id), None)
 
@@ -70,6 +72,8 @@ def _run_card_processing(event_id: int, card_id: int):
         logger.error(f"Card {card_id} processing error: {e}")
     finally:
         db.close()
+        from app.services.stop import clear_stop_card
+        clear_stop_card(card_id)
         with _running_lock:
             _running.pop(("card", card_id), None)
 

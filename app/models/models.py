@@ -117,8 +117,16 @@ class Detection(Base):
     validated_bib = Column(String(20), nullable=True)
     validated_class = Column(String(20), nullable=True)
     # Pipeline traceability
-    fallback_used = Column(Boolean, default=False)  # True if Qwen full-image fallback was used
-    ocr_raw_response = Column(String(200), nullable=True)  # Raw Qwen response for debugging
+    fallback_used = Column(Boolean, default=False)
+    ocr_raw_response = Column(String(200), nullable=True)
+
+    # Multi-person: per-detection status and visibility
+    status = Column(String(20), default="pending")  # pending, confirmed, manual, rejected, no_bib, background_runner, low_confidence
+    person_index = Column(Integer, default=0)  # 0=biggest person, 1=second, etc.
+    main_subject_score = Column(Float, default=0.0)  # how important this person is in the photo
+    is_primary_subject = Column(Boolean, default=True)  # is this a main subject vs background
+    is_usable_subject = Column(Boolean, default=True)  # passed photographer's eye filter
+    should_publish = Column(Boolean, default=True)  # show on client website
 
     photo = relationship("Photo", back_populates="detections")
 

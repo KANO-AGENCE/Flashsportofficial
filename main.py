@@ -19,8 +19,10 @@ from app.api.routes_web import router as web_router
 from app.api.routes_participants import router as participants_router
 from app.api.routes_frames import router as frames_router
 from app.api.routes_export import router as export_router
+from app.api.routes_training import router as training_router
 from app.db.database import Base, engine
 from app.models.auth import User  # noqa: F401
+from app.models.training import GroundTruth, ReviewItem, Dataset, DatasetEntry, AIModel, TrainingSession  # noqa: F401
 from app.models.web import WebEvent, WebPhoto, Customer, Order, OrderItem, Product, WebEventProduct  # noqa: F401
 from app.models.mailing import Mailing  # noqa: F401
 from app.models.participant import Participant  # noqa: F401
@@ -102,6 +104,7 @@ app.include_router(web_router)
 app.include_router(participants_router)
 app.include_router(frames_router)
 app.include_router(export_router)
+app.include_router(training_router)
 
 # Serve Vue.js frontend (built) or fallback to old frontend
 DIST_DIR = Path("frontend/dist")

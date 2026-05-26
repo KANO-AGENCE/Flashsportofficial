@@ -2,14 +2,34 @@ import cv2
 import numpy as np
 
 
-def is_blurry(image: np.ndarray, threshold: float = 100.0) -> tuple[bool, float]:
+def is_blurry(
+    image: np.ndarray,
+    threshold: float = 100.0,
+    person_bbox: tuple[int, int, int, int] | None = None,
+) -> tuple[bool, float]:
     """
-    Check if image is blurry using Laplacian variance.
-    Returns (is_blurry, blur_score).
-    Higher score = sharper. Below threshold = blurry.
+    Check if the SUBJECT is blurry using Laplacian variance.
+    If person_bbox is provided, measures blur on the person region only
+    (avoids false positives from intentional background bokeh).
+    Returns (is_blurry, blur_score). Higher score = sharper.
     """
     if image is None or image.size == 0:
         return True, 0.0
+
+    # Measure on person region if available
+    if person_bbox:
+        px, py, pw, ph = person_bbox
+        img_h, img_w = image.shape[:2]
+        x1 = max(0, px)
+        y1 = max(0, py)
+        x2 = min(img_w, px + pw)
+        y2 = min(img_h, py + ph)
+        if x2 > x1 and y2 > y1:
+            region = image[y1:y2, x1:x2]
+            gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+            score = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+            return score < threshold, score
+
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     score = float(cv2.Laplacian(gray, cv2.CV_64F).var())
     return score < threshold, score

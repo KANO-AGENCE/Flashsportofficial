@@ -17,6 +17,13 @@
       </button>
     </div>
 
+    <!-- DIAGNOSTIC TEMPORAIRE — A SUPPRIMER -->
+    <div class="mb-4 p-4 bg-yellow-100 border-2 border-yellow-400 rounded-xl">
+      <p class="text-sm font-bold text-yellow-800 mb-2">DIAGNOSTIC FILE PICKER</p>
+      <button @click="testPicker" class="bg-red-500 text-white px-4 py-2 rounded-lg font-bold mr-2">TEST PICKER</button>
+      <input ref="testInput" type="file" @change="e => console.log('FILES:', e.target.files)" />
+    </div>
+
     <!-- Global Stats -->
     <div v-if="event.stats" class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
       <div class="bg-white/70 backdrop-blur-xl border border-white/60 shadow-lg shadow-black/5 rounded-2xl p-4 text-center">
@@ -388,7 +395,7 @@
             @drop.prevent="handleDrop"
             :class="dragOver ? 'border-blue-500 bg-blue-50/50' : 'border-gray-300/60'"
             class="border-2 border-dashed rounded-2xl p-8 text-center transition cursor-pointer bg-white/30 backdrop-blur-sm"
-            @click="$refs.fileInput.click()"
+            @click="openFileDialog"
           >
             <svg class="w-10 h-10 mx-auto text-gray-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
             <p class="text-sm text-gray-600 font-medium">Glisse tes photos ici ou clique pour parcourir</p>
@@ -448,6 +455,8 @@ const importMode = ref('folder')
 const importPath = ref('')
 const importCardName = ref('')
 const selectedFiles = ref([])
+const fileInput = ref(null)
+const testInput = ref(null)
 const uploading = ref(false)
 const uploadProgress = ref(0)
 const dragOver = ref(false)
@@ -604,6 +613,21 @@ async function importFolder() {
     const importing = event.value.cards?.some(c => c.status === 'importing' || c.status === 'pending')
     if (!importing) clearInterval(cardPoll)
   }, 2000)
+}
+
+function testPicker() {
+  console.log('CLICK')
+  console.log('testInput REF =', testInput.value)
+  console.log('fileInput REF =', fileInput.value)
+  if (!testInput.value) { console.error('testInput REF NULL'); return }
+  testInput.value.click()
+}
+
+function openFileDialog() {
+  const input = fileInput.value
+  if (!input) { console.error('fileInput ref is null'); return }
+  input.value = ''
+  input.click()
 }
 
 function handleFileSelect(e) {

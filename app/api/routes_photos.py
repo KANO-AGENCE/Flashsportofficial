@@ -78,31 +78,54 @@ def delete_card(card_id: int, db: Session = Depends(get_db), _=Depends(_tri_user
     card = db.query(Card).filter(Card.id == card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
-    # Stop any running import for this event before deleting
-    from app.services.stop import request_stop
-    request_stop(card.event_id)
-    # Delete associated uploaded files
-    photos = db.query(Photo).filter(Photo.card_id == card_id).all()
-    for p in photos:
+    event_id = card.event_id
+
+    # Stop this card's processing and event-level too (in case it's running)
+    import time as _time
+    from app.services.stop import request_stop_card, clear_stop
+    request_stop_card(card_id)
+    _time.sleep(0.5)  # Let processing thread see the stop flag
+
+    # Collect file paths first (lightweight query)
+    filepaths = [row[0] for row in db.query(Photo.filepath).filter(Photo.card_id == card_id).all()]
+
+    # Delete detections via subquery (no in_ limit issues)
+    db.query(Detection).filter(
+        Detection.photo_id.in_(
+            db.query(Photo.id).filter(Photo.card_id == card_id)
+        )
+    ).delete(synchronize_session=False)
+
+    # Delete photos and card
+    db.query(Photo).filter(Photo.card_id == card_id).delete(synchronize_session=False)
+    db.query(Card).filter(Card.id == card_id).delete(synchronize_session=False)
+    db.commit()
+
+    # Clear any stale stop flags
+    clear_stop(event_id)
+
+    # Delete files on disk AFTER db commit
+    for fp in filepaths:
         try:
-            Path(p.filepath).unlink(missing_ok=True)
+            Path(fp).unlink(missing_ok=True)
         except Exception:
             pass
-    db.delete(card)
-    db.commit()
+
+    logger.info(f"Card {card_id} deleted: {len(filepaths)} files removed")
     return {"message": "Card deleted"}
 
 
 # --- Photos upload ---
 
 @router.post("/events/{event_id}/photos")
-async def upload_photos(
+def upload_photos(
     event_id: int,
     files: list[UploadFile],
     card_id: int | None = None,
     db: Session = Depends(get_db),
     _=Depends(_tri_user),
 ):
+    """Upload photos — sync route to avoid blocking the async event loop with cv2/IO."""
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -138,6 +161,7 @@ async def upload_photos(
         with open(dest, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
+        # Read dimensions — lightweight, just header decode
         img = cv2.imread(str(dest))
         width, height = (img.shape[1], img.shape[0]) if img is not None else (None, None)
 
@@ -155,6 +179,14 @@ async def upload_photos(
         uploaded.append({"id": photo.id, "filename": photo.filename, "original": original_name})
 
     db.commit()
+
+    # Update card photo count
+    if card_id:
+        card = db.query(Card).filter(Card.id == card_id).first()
+        if card:
+            card.photo_count = db.query(func.count(Photo.id)).filter(Photo.card_id == card_id).scalar()
+            db.commit()
+
     return {"uploaded": len(uploaded), "photos": uploaded}
 
 
@@ -431,6 +463,10 @@ def validate_detection(
         detection.validated_bib = data.validated_bib
     if data.validated_class is not None:
         detection.validated_class = data.validated_class
+    if data.should_publish is not None:
+        detection.should_publish = data.should_publish
+    if data.status is not None:
+        detection.status = data.status
 
     db.commit()
     db.refresh(detection)
@@ -439,5 +475,13 @@ def validate_detection(
     if photo:
         from app.services.pipeline import rebuild_bib_groups
         rebuild_bib_groups(photo.event_id, db)
+
+    # Auto-collect ground truth from validation
+    try:
+        from app.services.training_service import collect_ground_truth_from_detection
+        collect_ground_truth_from_detection(detection, db)
+        db.commit()
+    except Exception as e:
+        logger.debug(f"Ground truth collection skipped: {e}")
 
     return DetectionOut.model_validate(detection)
