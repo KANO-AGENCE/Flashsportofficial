@@ -485,3 +485,45 @@ def validate_detection(
         logger.debug(f"Ground truth collection skipped: {e}")
 
     return DetectionOut.model_validate(detection)
+
+
+class ManualDetectionCreate(BaseModel):
+    bib_number: str
+    validated_class: str = "bon"
+
+
+@router.post("/photos/{photo_id}/detections/manual", response_model=DetectionOut)
+def create_manual_detection(
+    photo_id: int,
+    data: ManualDetectionCreate,
+    db: Session = Depends(get_db),
+    _=Depends(_tri_user),
+):
+    """Create a manual detection for a photo (used in manual verification mode)."""
+    photo = db.query(Photo).filter(Photo.id == photo_id).first()
+    if not photo:
+        raise HTTPException(status_code=404, detail="Photo not found")
+
+    detection = Detection(
+        photo_id=photo_id,
+        bib_number=data.bib_number,
+        validated=True,
+        validated_bib=data.bib_number,
+        validated_class=data.validated_class,
+        status="manual",
+        confidence_detection=1.0,
+        confidence_ocr=1.0,
+        classification=data.validated_class,
+        is_primary_subject=True,
+        is_usable_subject=True,
+        should_publish=data.validated_class == "bon",
+        main_subject_score=1.0,
+    )
+    db.add(detection)
+    db.commit()
+    db.refresh(detection)
+
+    from app.services.pipeline import rebuild_bib_groups
+    rebuild_bib_groups(photo.event_id, db)
+
+    return DetectionOut.model_validate(detection)

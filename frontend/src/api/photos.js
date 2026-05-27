@@ -30,6 +30,9 @@ export const photosApi = {
   validateDetection(detectionId, data) {
     return api.put(`/detections/${detectionId}/validate`, data)
   },
+  createManualDetection(photoId, data) {
+    return api.post(`/photos/${photoId}/detections/manual`, data)
+  },
   process(eventId) {
     return api.post(`/events/${eventId}/process`)
   },

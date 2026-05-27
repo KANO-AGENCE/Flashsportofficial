@@ -260,6 +260,7 @@ const sessionFilter = ref('all')
 
 const SECONDARY_THRESHOLD = 0.15
 const lastValidatedIdx = ref(-1)
+const skippedPhotos = ref(new Set())
 
 const eventId = computed(() => route.params.id)
 const cardId = computed(() => route.query.card_id || null)
@@ -398,6 +399,7 @@ function allDets(photo) {
 
 function photoVerifStatus(photo) {
   if (!photo) return 'pending'
+  if (skippedPhotos.value.has(photo.id)) return 'rejected'
   const dets = visibleDets(photo)
   if (!dets.length) return 'pending'
   const allV = dets.every(d => d.validated)
@@ -460,7 +462,8 @@ function statusLabel(s) {
 async function loadPhotos() {
   loading.value = true
   try {
-    const params = { processed_only: true }
+    const params = {}
+    if (!autoVerif.value) params.processed_only = true
     if (cardId.value) params.card_id = cardId.value
     const res = await photosApi.list(eventId.value, params)
     allPhotos.value = res.data
@@ -497,6 +500,7 @@ function startVerifMode() {
   sessionPhotos.value = [...allPhotos.value].sort((a, b) => a.id - b.id)
   viewerIdx.value = 0
   history.value = []
+  skippedPhotos.value = new Set()
   viewerOpen.value = true
   syncBibField()
 }
@@ -533,10 +537,17 @@ function syncBibField() {
     return
   }
 
-  // Bad photo (flou, coupe, no detection) → pre-fill x
-  if (isBadPhoto(photo)) {
+  // Bad photo (flou, coupe) → pre-fill x, but not if simply no detections (manual mode)
+  if (dets.length && isBadPhoto(photo)) {
     bibFieldValue.value = 'x'
     nextTick(() => { bibInput.value?.focus(); bibInput.value?.select() })
+    return
+  }
+
+  // No detections at all (unprocessed) → empty field for manual entry
+  if (!dets.length) {
+    bibFieldValue.value = ''
+    nextTick(() => { bibInput.value?.focus() })
     return
   }
 
@@ -600,8 +611,16 @@ async function validateAndNext() {
 
   const dets = currentVisibleDets.value
 
-  // No detections (unprocessed photo) — skip to next
+  // No detections — create manual detections for each bib entered
   if (!dets.length) {
+    const bibs = raw.split(/\s+/).filter(Boolean)
+    if (!bibs.length) { skippedPhotos.value.add(photo.id); flash(); advanceToNextPending(); return }
+    for (const bib of bibs) {
+      const res = await photosApi.createManualDetection(photo.id, { bib_number: bib, validated_class: 'bon' })
+      if (!photo.detections) photo.detections = []
+      photo.detections.push(res.data)
+    }
+    lastValidatedIdx.value = viewerIdx.value
     flash()
     advanceToNextPending()
     return
@@ -638,8 +657,12 @@ async function rejectAndNext() {
   if (!photo) return
   const dets = currentVisibleDets.value
 
-  // No detections (unprocessed photo) — skip to next
+  // No detections — create a rejected manual detection
   if (!dets.length) {
+    const res = await photosApi.createManualDetection(photo.id, { bib_number: '0', validated_class: 'mauvais' })
+    if (!photo.detections) photo.detections = []
+    photo.detections.push(res.data)
+    lastValidatedIdx.value = viewerIdx.value
     flash()
     advanceToNextPending()
     return

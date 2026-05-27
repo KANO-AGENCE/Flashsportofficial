@@ -17,12 +17,6 @@
       </button>
     </div>
 
-    <!-- DIAGNOSTIC TEMPORAIRE — A SUPPRIMER -->
-    <div class="mb-4 p-4 bg-yellow-100 border-2 border-yellow-400 rounded-xl">
-      <p class="text-sm font-bold text-yellow-800 mb-2">DIAGNOSTIC FILE PICKER</p>
-      <button @click="testPicker" class="bg-red-500 text-white px-4 py-2 rounded-lg font-bold mr-2">TEST PICKER</button>
-      <input ref="testInput" type="file" @change="e => console.log('FILES:', e.target.files)" />
-    </div>
 
     <!-- Global Stats -->
     <div v-if="event.stats" class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
@@ -248,7 +242,7 @@
               <span v-if="card.validated_count" class="text-gray-600 font-medium">{{ card.validated_count }} validees</span>
             </div>
             <div class="w-full bg-gray-200/50 rounded-full h-1.5">
-              <div class="h-1.5 rounded-full transition-all bg-gradient-to-r"
+              <div class="h-1.5 rounded-full bg-gradient-to-r transition-[width] duration-700 ease-out"
                 :class="card.pending_count === 0 ? 'from-green-500 to-green-400' : 'from-blue-500 to-blue-400'"
                 :style="{ width: (card.processed_count / card.photo_count * 100) + '%' }"></div>
             </div>
@@ -284,6 +278,13 @@
               class="bg-white/80 hover:bg-white text-blue-600 border border-blue-200/60 px-4 py-2 rounded-xl text-xs font-medium transition"
             >
               Mode Verif
+            </button>
+            <button
+              v-if="card.photo_count > 0 && card.processed_count === 0"
+              @click="router.push(`/tri/events/${event.id}/photos?card_id=${card.id}&verif=1`)"
+              class="bg-white/80 hover:bg-white text-amber-600 border border-amber-200/60 px-4 py-2 rounded-xl text-xs font-medium transition"
+            >
+              Verif manuelle
             </button>
           </div>
         </div>
@@ -344,7 +345,7 @@
         <span class="text-sm text-gray-500 font-mono">{{ processStatus.processed }} / {{ processStatus.total }}</span>
       </div>
       <div class="w-full bg-gray-200/50 rounded-full h-2">
-        <div class="bg-gradient-to-r from-blue-500 to-blue-400 h-2 rounded-full transition-all" :style="{ width: progressPct + '%' }"></div>
+        <div class="bg-gradient-to-r from-blue-500 to-blue-400 h-2 rounded-full transition-[width] duration-700 ease-out" :style="{ width: progressPct + '%' }"></div>
       </div>
     </div>
 
@@ -416,7 +417,7 @@
           </div>
 
           <div v-if="uploading" class="w-full bg-gray-200/50 rounded-full h-2">
-            <div class="bg-gradient-to-r from-blue-500 to-blue-400 h-2 rounded-full transition-all" :style="{ width: uploadProgress + '%' }"></div>
+            <div class="bg-gradient-to-r from-blue-500 to-blue-400 h-2 rounded-full transition-[width] duration-700 ease-out" :style="{ width: uploadProgress + '%' }"></div>
           </div>
 
           <div class="flex justify-end gap-3">
@@ -456,7 +457,6 @@ const importPath = ref('')
 const importCardName = ref('')
 const selectedFiles = ref([])
 const fileInput = ref(null)
-const testInput = ref(null)
 const uploading = ref(false)
 const uploadProgress = ref(0)
 const dragOver = ref(false)
@@ -613,14 +613,6 @@ async function importFolder() {
     const importing = event.value.cards?.some(c => c.status === 'importing' || c.status === 'pending')
     if (!importing) clearInterval(cardPoll)
   }, 2000)
-}
-
-function testPicker() {
-  console.log('CLICK')
-  console.log('testInput REF =', testInput.value)
-  console.log('fileInput REF =', fileInput.value)
-  if (!testInput.value) { console.error('testInput REF NULL'); return }
-  testInput.value.click()
 }
 
 function openFileDialog() {
