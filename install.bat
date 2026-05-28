@@ -8,7 +8,7 @@ echo   FLASHSPORT - INSTALLATION AUTOMATIQUE
 echo ============================================
 echo.
 echo   Ce script installe Python, Node.js et
-echo   Docker Desktop automatiquement.
+echo   PostgreSQL automatiquement.
 echo.
 echo   IMPORTANT : ce script doit etre lance
 echo   en tant qu'ADMINISTRATEUR.
@@ -43,7 +43,7 @@ echo   winget ............. OK
 echo.
 
 :: ---- Python ----
-echo [1/4] Installation de Python 3.11...
+echo [1/3] Installation de Python 3.11...
 python --version >nul 2>&1
 if %errorlevel% equ 0 (
     echo   Python deja installe, on passe.
@@ -54,7 +54,7 @@ if %errorlevel% equ 0 (
 echo.
 
 :: ---- Node.js ----
-echo [2/4] Installation de Node.js LTS...
+echo [2/3] Installation de Node.js LTS...
 node --version >nul 2>&1
 if %errorlevel% equ 0 (
     echo   Node.js deja installe, on passe.
@@ -64,22 +64,31 @@ if %errorlevel% equ 0 (
 )
 echo.
 
-:: ---- Docker Desktop ----
-echo [3/4] Installation de Docker Desktop...
-docker --version >nul 2>&1
+:: ---- PostgreSQL ----
+echo [3/3] Installation de PostgreSQL 16...
+pg_isready >nul 2>&1
 if %errorlevel% equ 0 (
-    echo   Docker deja installe, on passe.
+    echo   PostgreSQL deja installe, on passe.
 ) else (
-    winget install Docker.DockerDesktop --accept-package-agreements --accept-source-agreements --silent
-    echo   Docker Desktop ..... INSTALLE
+    winget install PostgreSQL.PostgreSQL.16 --accept-package-agreements --accept-source-agreements --silent
+    echo   PostgreSQL ......... INSTALLE
 )
 echo.
 
-:: ---- WSL ----
-echo [4/4] Installation/mise a jour de WSL...
-wsl --install --no-distribution >nul 2>&1
-wsl --update >nul 2>&1
-echo   WSL ................ OK
+:: ---- Création de la base et de l'utilisateur ----
+echo Configuration de la base de donnees...
+echo   Attente du demarrage de PostgreSQL...
+timeout /t 5 /nobreak >nul
+
+:: Ajouter PostgreSQL au PATH temporairement
+set "PGPATH=C:\Program Files\PostgreSQL\16\bin"
+if exist "%PGPATH%\psql.exe" set "PATH=%PGPATH%;%PATH%"
+
+:: Créer l'utilisateur et la base (ignore les erreurs si déjà existants)
+psql -U postgres -c "CREATE USER flashsport WITH PASSWORD 'flashsport_pwd';" 2>nul
+psql -U postgres -c "CREATE DATABASE flashsport_tri OWNER flashsport;" 2>nul
+psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE flashsport_tri TO flashsport;" 2>nul
+echo   Base de donnees .... OK
 echo.
 
 echo ============================================
