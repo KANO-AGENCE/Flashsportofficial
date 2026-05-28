@@ -1,35 +1,43 @@
 @echo off
 chcp 65001 >nul 2>&1
-title FlashSport - Launcher
+title FlashSport
 color 0A
 
-echo ============================================
-echo        FLASHSPORT - LANCEMENT AUTO
-echo ============================================
+echo.
+echo    ╔══════════════════════════════════════╗
+echo    ║                                      ║
+echo    ║       ⚡  F L A S H S P O R T  ⚡    ║
+echo    ║                                      ║
+echo    ╚══════════════════════════════════════╝
+echo.
 echo.
 
+:: ---- Se placer dans le bon dossier ----
+cd /d "%~dp0"
+
 :: ---- Vérification des logiciels ----
-echo [1/7] Verification des logiciels...
+echo    Verification des logiciels...
+echo.
 
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
     color 0C
-    echo   ERREUR : Python n'est pas installe !
-    echo   Lance install.bat d'abord.
+    echo    ✘ Python n'est pas installe !
+    echo      Lance install.bat d'abord.
     pause
     exit /b 1
 )
-echo   Python ............. OK
+echo    ✔ Python
 
 node --version >nul 2>&1
 if %errorlevel% neq 0 (
     color 0C
-    echo   ERREUR : Node.js n'est pas installe !
-    echo   Lance install.bat d'abord.
+    echo    ✘ Node.js n'est pas installe !
+    echo      Lance install.bat d'abord.
     pause
     exit /b 1
 )
-echo   Node.js ............ OK
+echo    ✔ Node.js
 
 :: Ajouter PostgreSQL au PATH temporairement
 set "PGPATH=C:\Program Files\PostgreSQL\16\bin"
@@ -37,93 +45,132 @@ if exist "%PGPATH%\psql.exe" set "PATH=%PGPATH%;%PATH%"
 
 pg_isready >nul 2>&1
 if %errorlevel% neq 0 (
-    echo   PostgreSQL ne tourne pas, tentative de demarrage...
+    echo    ⏳ Demarrage de PostgreSQL...
     net start postgresql-x64-16 >nul 2>&1
     timeout /t 3 /nobreak >nul
     pg_isready >nul 2>&1
     if %errorlevel% neq 0 (
         color 0C
-        echo   ERREUR : PostgreSQL ne demarre pas !
-        echo   Lance install.bat d'abord.
+        echo    ✘ PostgreSQL ne demarre pas !
+        echo      Lance install.bat d'abord.
         pause
         exit /b 1
     )
 )
-echo   PostgreSQL ......... OK
+echo    ✔ PostgreSQL
 echo.
 
-:: ---- Se placer dans le bon dossier ----
-cd /d "%~dp0"
-
 :: ---- Environnement virtuel Python ----
-echo [2/7] Preparation de l'environnement Python...
+echo    ⏳ Preparation de l'environnement...
 if not exist "venv\Scripts\activate.bat" (
-    echo   Creation du venv...
     python -m venv venv
 )
 call venv\Scripts\activate.bat
-echo   Venv ............... OK
+echo    ✔ Environnement Python
 echo.
 
 :: ---- Installation des dependances Python ----
-echo [3/7] Installation des dependances Python...
-echo.
-echo   Premiere fois = 5-10 min, les fois suivantes = quelques secondes.
-echo   Les paquets deja installes seront ignores.
-echo.
-pip install -r requirements.txt 2>&1
-echo.
-echo   Dependances Python . OK
+pip show fastapi >nul 2>&1
+if %errorlevel% neq 0 (
+    echo    ⏳ Installation des dependances Python...
+    echo      Premiere fois = 5-10 min, patience...
+    echo.
+    pip install -r requirements.txt 2>&1
+    echo.
+)
+echo    ✔ Dependances Python
 echo.
 
 :: ---- Installation des dependances Frontend ----
-echo [4/7] Installation des dependances Frontend...
 if not exist "frontend\node_modules" (
-    echo   Premiere installation des modules frontend...
+    echo    ⏳ Installation des dependances Frontend...
     cd frontend
     call npm install
     cd ..
+    echo.
 )
-echo   Dependances Front .. OK
+echo    ✔ Dependances Frontend
 echo.
 
 :: ---- Init DB + Admin ----
-echo [5/7] Initialisation de la base de donnees...
-python scripts/init_db.py 2>nul
-python scripts/seed_admin.py 2>nul
-echo   Base de donnees .... OK
+echo    ⏳ Verification de la base de donnees...
+python scripts/init_db.py >nul 2>&1
+python scripts/seed_admin.py >nul 2>&1
+echo    ✔ Base de donnees prete
 echo.
 
-:: ---- Lancement du Backend ----
-echo [6/7] Lancement du Backend (port 8000)...
-start "FlashSport-Backend" cmd /c "cd /d "%~dp0" && call venv\Scripts\activate.bat && python main.py"
-timeout /t 5 /nobreak >nul
-echo   Backend ............ OK
+:: ---- Lancement du Backend (caché) ----
+echo    ⏳ Demarrage du serveur...
+
+:: Créer un script VBS pour lancer le backend sans fenêtre visible
+echo Set ws = CreateObject("WScript.Shell") > "%~dp0_launch_backend.vbs"
+echo ws.Run "cmd /c cd /d ""%~dp0"" && call venv\Scripts\activate.bat && python main.py", 0, False >> "%~dp0_launch_backend.vbs"
+wscript "%~dp0_launch_backend.vbs"
+
+:: Créer un script VBS pour lancer le frontend sans fenêtre visible
+echo Set ws = CreateObject("WScript.Shell") > "%~dp0_launch_frontend.vbs"
+echo ws.Run "cmd /c cd /d ""%~dp0frontend"" && npm run dev", 0, False >> "%~dp0_launch_frontend.vbs"
+wscript "%~dp0_launch_frontend.vbs"
+
+:: Attendre que le backend soit prêt
+echo.
+echo    Demarrage en cours
+set /a count=0
+:wait_backend
+set /a count+=1
+if %count% gtr 30 (
+    echo.
+    echo    ✘ Le backend ne repond pas.
+    pause
+    exit /b 1
+)
+timeout /t 2 /nobreak >nul
+curl -s http://localhost:8000/docs -o nul -w "%%{http_code}" 2>nul | findstr "200" >nul
+if %errorlevel% neq 0 (
+    <nul set /p "=."
+    goto wait_backend
+)
+echo.
+echo    ✔ Backend demarre
 echo.
 
-:: ---- Lancement du Frontend ----
-echo [7/7] Lancement du Frontend (port 5173)...
-start "FlashSport-Frontend" cmd /c "cd /d "%~dp0\frontend" && npm run dev"
-timeout /t 5 /nobreak >nul
-echo   Frontend ........... OK
+:: Attendre que le frontend soit prêt
+set /a count=0
+:wait_frontend
+set /a count+=1
+if %count% gtr 20 (
+    echo.
+    echo    ✘ Le frontend ne repond pas.
+    pause
+    exit /b 1
+)
+timeout /t 2 /nobreak >nul
+curl -s http://localhost:5173 -o nul -w "%%{http_code}" 2>nul | findstr "200" >nul
+if %errorlevel% neq 0 (
+    <nul set /p "=."
+    goto wait_frontend
+)
+echo    ✔ Frontend demarre
 echo.
+
+:: ---- Nettoyage des fichiers temporaires ----
+del "%~dp0_launch_backend.vbs" >nul 2>&1
+del "%~dp0_launch_frontend.vbs" >nul 2>&1
 
 :: ---- Ouverture du navigateur ----
-echo ============================================
-echo   FLASHSPORT EST PRET !
 echo.
-echo   App    : http://localhost:5173
-echo   Login  : admin@flashsport.fr
-echo   Pass   : admin
-echo   API    : http://localhost:8000/docs
-echo ============================================
+echo    ╔══════════════════════════════════════╗
+echo    ║                                      ║
+echo    ║     ✔  FLASHSPORT EST PRET !         ║
+echo    ║                                      ║
+echo    ║     Login : admin@flashsport.fr      ║
+echo    ║     Pass  : admin                    ║
+echo    ║                                      ║
+echo    ╚══════════════════════════════════════╝
 echo.
-echo Ouverture du navigateur...
+
 timeout /t 2 /nobreak >nul
 start http://localhost:5173
 
-echo.
-echo (Cette fenetre peut etre fermee, les serveurs
-echo  tournent dans leurs propres fenetres)
-echo.
-pause
+timeout /t 5 /nobreak >nul
+exit
