@@ -133,3 +133,8 @@ def serve_frontend(full_path: str):
     if vue_index.exists():
         return FileResponse(str(vue_index))
     return FileResponse("frontend_legacy/index.html")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

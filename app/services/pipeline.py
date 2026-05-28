@@ -24,7 +24,6 @@ from sqlalchemy.orm import Session
 
 from app.models.models import BibGroup, Detection, Photo, Event
 from app.services.detection import extract_bib_regions
-from app.services.ocr_gpt import apply_rotation
 from app.services.ocr_qwen import detect_rotation_qwen, read_bib_from_crop, fullimage_fallback
 from app.services.orientation import auto_orient
 from app.services.quality import is_blurry, is_person_cut, compute_framing_score
@@ -34,6 +33,17 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 WORKERS = settings.ai_workers
+
+
+def apply_rotation(image: np.ndarray, degrees: int) -> np.ndarray:
+    """Apply clockwise rotation to image."""
+    if degrees == 90:
+        return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+    elif degrees == 180:
+        return cv2.rotate(image, cv2.ROTATE_180)
+    elif degrees == 270:
+        return cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    return image
 
 
 def _detect_persons_from_array(img: np.ndarray, confidence: float = 0.35) -> list[dict]:

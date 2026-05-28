@@ -1,98 +1,171 @@
-# Flashsport Tri
+# FlashSport Tri
 
-Tri automatique de photos sportives par detection de dossard et analyse qualite.
+Plateforme de photographie evenementielle sportive. Tri automatique des photos par IA (detection de personnes + lecture de dossards), verification manuelle, boutique en ligne et mailing.
 
-## Pipeline
+## Pipeline IA
 
 ```
-Upload photos → Detection personnes (YOLOv8) → Extraction zone dossard → OCR (PaddleOCR)
-→ Analyse qualite (nettete + cadrage) → Score global → Classification → Validation humaine
+Upload photos
+  -> Detection personnes (YOLOv8)
+  -> Lecture dossard (Qwen2.5-VL via Ollama)
+  -> Analyse qualite (nettete + cadrage)
+  -> Score global + classification
+  -> Verification humaine
+  -> Publication boutique
 ```
 
 ## Prerequis
 
-- **Python 3.11+** (`brew install python@3.11` ou `pyenv install 3.11`)
-- **Docker** (pour PostgreSQL)
+- **Docker Desktop** — [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
+- **Ollama** — [ollama.com](https://ollama.com) (pour l'OCR local Qwen)
+- **Python 3.11+** (pour le developpement sans Docker)
+- **Node.js 18+** (pour le developpement sans Docker)
 
-## Installation
+## Installation rapide (Docker, recommande)
+
+Fonctionne sur **Windows**, **macOS** et **Linux**.
 
 ```bash
-# 1. Cloner et entrer dans le dossier
-cd "Flashsport tri"
+# 1. Cloner le projet
+git clone https://github.com/KANO-AGENCE/Flashsportofficial.git
+cd Flashsportofficial
 
-# 2. Creer l'environnement virtuel
+# 2. Copier la config
+cp .env.example .env
+
+# 3. Installer Ollama + modele Qwen
+ollama pull qwen2.5vl:3b
+
+# 4. Lancer tout
+docker compose up --build -d
+
+# 5. Creer le compte admin (premiere fois uniquement)
+docker compose exec backend python scripts/seed_admin.py
+```
+
+L'application est accessible sur :
+- **http://localhost** — Dashboard admin
+- **http://localhost:8000/docs** — Documentation API (Swagger)
+
+## Installation developpement (sans Docker)
+
+### 1. Base de donnees
+
+Lancer PostgreSQL seul via Docker :
+
+```bash
+docker compose up db -d
+```
+
+### 2. Backend
+
+**macOS :**
+```bash
 python3.11 -m venv venv
 source venv/bin/activate
-
-# 3. Installer les dependances
 pip install -r requirements.txt
-
-# 4. Lancer PostgreSQL
-docker compose up -d
-
-# 5. Lancer l'application
+python scripts/init_db.py
+python scripts/seed_admin.py
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Ouvrir http://localhost:8000
+**Windows :**
+```bash
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+python scripts/init_db.py
+python scripts/seed_admin.py
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Note Windows : si l'installation echoue a cause des chemins longs, activer le support dans PowerShell (admin) :
+```powershell
+Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -Value 1
+```
+
+### 3. Frontend admin
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Accessible sur http://localhost:5173
+
+### 4. Frontend boutique
+
+```bash
+cd frontend-web
+npm install
+npm run dev
+```
+
+Accessible sur http://localhost:5174
+
+## URLs personnalisees (reseau local)
+
+Pour acceder avec des noms propres au lieu d'IP, ajouter dans le fichier hosts de chaque poste :
+
+**Windows :** `C:\Windows\System32\drivers\etc\hosts`
+**macOS :** `/etc/hosts`
+
+```
+192.168.1.50    flashsport.app
+192.168.1.50    boutique.flashsport.app
+```
+
+(Remplacer `192.168.1.50` par l'IP du serveur)
+
+## Connexion
+
+Compte par defaut :
+- Email : `admin@flashsport.fr`
+- Mot de passe : `admin`
+
+**Changer le mot de passe en production.**
 
 ## Utilisation
 
-1. **Creer un evenement** (nom + date)
-2. **Uploader les photos** (drag & drop ou selection de fichiers)
-3. **Lancer le traitement** → detection + OCR + scoring automatique
-4. **Consulter les resultats** par dossard ou par photo
-5. **Valider** les photos "incertaines" (corriger numero, changer categorie)
+1. **Creer un evenement** (nom, date, configuration course)
+2. **Importer les participants** (fichier Excel)
+3. **Importer les photos** (depuis carte SD ou dossier)
+4. **Lancer le traitement IA** (detection + OCR + scoring)
+5. **Verifier les resultats** (corriger les dossards incertains)
+6. **Publier** vers la boutique en ligne
+7. **Envoyer un mailing** aux participants (optionnel)
 
-## API Endpoints
+## Roles utilisateur
 
-| Methode | URL | Description |
-|---------|-----|-------------|
-| POST | `/api/events` | Creer un evenement |
-| GET | `/api/events` | Lister les evenements |
-| GET | `/api/events/{id}` | Detail d'un evenement |
-| DELETE | `/api/events/{id}` | Supprimer un evenement |
-| POST | `/api/events/{id}/photos` | Uploader des photos |
-| GET | `/api/events/{id}/photos` | Lister les photos |
-| GET | `/api/events/{id}/bibs` | Groupement par dossard |
-| GET | `/api/photos/{id}` | Detail d'une photo |
-| POST | `/api/events/{id}/process` | Lancer le traitement |
-| GET | `/api/events/{id}/process/status` | Statut du traitement |
-| PUT | `/api/detections/{id}/validate` | Valider une detection |
+- **SUPERADMIN** — Acces total, gestion des utilisateurs
+- **ADMIN** — Gestion des evenements et modules
+- **POSTE_TRI** — Tri et verification des photos uniquement
 
-Documentation Swagger: http://localhost:8000/docs
+## Modules
 
-## Classification
-
-| Score | Categorie |
-|-------|-----------|
-| >= 70% | **Bon** - photo exploitable |
-| 40-70% | **Incertain** - a verifier |
-| < 40% | **Mauvais** - inexploitable |
-
-## Score composite
-
-| Critere | Poids |
-|---------|-------|
-| Confiance detection YOLO | 20% |
-| Confiance OCR | 30% |
-| Nettete (Laplacien) | 30% |
-| Cadrage | 20% |
+- **TRI** — Import, traitement IA, verification, exports
+- **WEB** — Boutique en ligne, commandes, produits
+- **MAILING** — Campagnes email aux participants
 
 ## Structure
 
 ```
-├── main.py              # Point d'entree FastAPI
-├── config.py            # Configuration
-├── app/
-│   ├── api/             # Routes FastAPI
-│   ├── services/        # Detection, OCR, Qualite, Scoring, Pipeline
-│   ├── models/          # Modeles SQLAlchemy
-│   ├── schemas/         # Schemas Pydantic
-│   └── db/              # Config base de donnees
-├── frontend/            # Interface HTML/JS
-├── tests/               # Tests unitaires
-└── uploads/             # Photos (genere automatiquement)
+main.py              # Point d'entree FastAPI
+config.py            # Configuration (via .env)
+docker-compose.yml   # Deploiement tout-en-un
+Dockerfile           # Image Docker backend
+nginx/               # Reverse proxy config
+app/
+  api/               # Routes FastAPI
+  services/          # Detection, OCR, Qualite, Pipeline
+  models/            # Modeles SQLAlchemy
+  schemas/           # Schemas Pydantic
+  db/                # Config base de donnees
+frontend/            # Dashboard admin (Vue 3)
+frontend-web/        # Boutique publique (Vue 3)
+scripts/             # Init DB, seed admin
+tests/               # Tests unitaires
 ```
 
 ## Tests
@@ -104,12 +177,7 @@ pytest tests/ -v
 ## Securite
 
 - 100% local, aucune API externe
-- Aucun appel reseau sortant
+- OCR via Ollama (local)
 - Stockage fichiers local
+- JWT + roles + modules
 - Pret pour deploiement sur serveur isole (LAN/VPN)
-
-## Note sur la detection
-
-Le MVP utilise YOLOv8n (modele general COCO) avec une heuristique pour localiser
-la zone du dossard sur le torse des athletes detectes. Pour de meilleures performances,
-entrainer un modele YOLOv8 custom sur des annotations de dossards.
