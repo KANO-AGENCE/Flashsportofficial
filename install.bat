@@ -85,9 +85,11 @@ set "PGPATH=C:\Program Files\PostgreSQL\16\bin"
 if exist "%PGPATH%\psql.exe" set "PATH=%PGPATH%;%PATH%"
 
 :: Créer l'utilisateur et la base (ignore les erreurs si déjà existants)
+set "PGPASSWORD=postgres"
 psql -U postgres -c "CREATE USER flashsport WITH PASSWORD 'flashsport_pwd';" 2>nul
 psql -U postgres -c "CREATE DATABASE flashsport_tri OWNER flashsport;" 2>nul
 psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE flashsport_tri TO flashsport;" 2>nul
+set "PGPASSWORD="
 echo   Base de donnees .... OK
 echo.
 

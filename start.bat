@@ -67,15 +67,21 @@ echo.
 
 :: ---- Installation des dependances Python ----
 echo [3/7] Installation des dependances Python...
-pip install -r requirements.txt --quiet 2>nul
+echo.
+echo   Premiere fois = 5-10 min, les fois suivantes = quelques secondes.
+echo   Les paquets deja installes seront ignores.
+echo.
+pip install -r requirements.txt 2>&1
+echo.
 echo   Dependances Python . OK
 echo.
 
 :: ---- Installation des dependances Frontend ----
 echo [4/7] Installation des dependances Frontend...
 if not exist "frontend\node_modules" (
+    echo   Premiere installation des modules frontend...
     cd frontend
-    call npm install --silent 2>nul
+    call npm install
     cd ..
 )
 echo   Dependances Front .. OK
